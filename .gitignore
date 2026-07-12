@@ -41,3 +41,8 @@ terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfvars
+
+# internal deploy notes — keep local, not published to the repo
+/step_deploy.md
+/step_deploy_explained.md
+.env.smoketest
