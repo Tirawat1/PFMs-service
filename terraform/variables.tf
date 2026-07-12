@@ -26,3 +26,16 @@ variable "root_volume_gb" {
   type        = number
   default     = 20
 }
+
+variable "enable_lab_nacl" {
+  description = <<-EOT
+    Opt-in: attach a custom, explicit-allow Network ACL to the instance's
+    subnet (see nacl_lab.tf). Off by default — a NACL applies to the whole
+    subnet, and if this is your account's default VPC, a mistake here can
+    affect anything else running in that subnet, not just this instance.
+    Safe to flip back to false any time; that reverts the subnet to the
+    VPC's default (allow-all) NACL immediately via `terraform apply`.
+  EOT
+  type        = bool
+  default     = false
+}

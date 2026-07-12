@@ -12,6 +12,20 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_vpc" "default" {
+  default = true
+}
+
+# Pinned explicitly (rather than left to AWS's default subnet selection) so
+# the optional NACL lab below always attaches to the same subnet the
+# instance actually runs in.
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -68,6 +82,7 @@ resource "aws_instance" "pfms" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   key_name               = var.key_pair_name
+  subnet_id              = sort(data.aws_subnets.default.ids)[0]
   vpc_security_group_ids = [aws_security_group.pfms.id]
   user_data              = file("${path.module}/user_data.sh")
 
