@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.env
+.env.local
+.env.production
+npm-debug.log
+README.md
+step_deploy.md
+terraform
+.github

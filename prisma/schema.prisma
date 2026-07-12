@@ -1,0 +1,103 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Role {
+  id      String  @id @default(cuid())
+  name    String
+  nameTh  String  @default("")
+  perms   Json // array of permission keys, or ["*"] for admin
+  contact String  @default("")
+  system  Boolean @default(false)
+  users   User[]
+}
+
+model User {
+  id            String         @id @default(cuid())
+  name          String
+  username      String         @unique
+  passwordHash  String
+  dept          String         @default("")
+  roleId        String
+  role          Role           @relation(fields: [roleId], references: [id])
+  email         String         @default("")
+  emailNotify   Boolean        @default(false)
+  notifications Notification[]
+}
+
+model Category {
+  id     String @id @default(cuid())
+  name   String
+  nameTh String @default("")
+  icon   String @default("ph-tag")
+  docs   Json // array of document names
+  notes  String @default("")
+}
+
+model MasterDoc {
+  id   String @id @default(cuid())
+  name String @unique
+}
+
+model Account {
+  id      String @id // "faculty" | "project"
+  name    String
+  nameTh  String @default("")
+  icon    String @default("ph-bank")
+  balance Float  @default(0)
+}
+
+model Txn {
+  id     String   @id @default(cuid())
+  acctId String
+  type   String // "in" | "out"
+  amount Float
+  desc   String
+  date   DateTime @default(now())
+}
+
+model Request {
+  id            String   @id // e.g. RB-1042
+  title         String
+  categoryId    String
+  amount        Float
+  dept          String
+  requesterId   String?
+  requesterName String
+  status        String   @default("notified")
+  desc          String   @default("")
+  driveFolder   String   @default("")
+  // docs: [{name, submitted, link, fileName,
+  //          disc: {open, note, by, ts, fixed, fixedNote} | null}]
+  docs          Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Notification {
+  id     String   @id @default(cuid())
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text   String
+  type   String   @default("notified")
+  read   Boolean  @default(false)
+  ts     DateTime @default(now())
+}
+
+model Audit {
+  id     String   @id @default(cuid())
+  user   String
+  role   String
+  action String
+  ts     DateTime @default(now())
+}
+
+model Counter {
+  id    String @id
+  value Int
+}
