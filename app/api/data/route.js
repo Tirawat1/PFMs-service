@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSessionUser, can, sanitizeUser } from "@/lib/auth";
+import { shapeSnapshot } from "@/lib/snapshot.mjs";
 
 // Returns the full app snapshot, filtered by the caller's permissions.
 export async function GET() {
@@ -21,16 +22,10 @@ export async function GET() {
       admin ? prisma.audit.findMany({ orderBy: { ts: "desc" }, take: 300 }) : Promise.resolve([]),
     ]);
 
-  return NextResponse.json({
-    me: sanitizeUser(me),
-    roles,
-    users: admin ? users.map(sanitizeUser) : [],
-    categories,
-    masterDocs,
-    accounts: can(me, "accounts") || admin ? accounts : [],
-    txns: can(me, "accounts") || admin ? txns : [],
-    requests,
-    notifs,
-    audit,
-  });
+  const shaped = shapeSnapshot(
+    { admin, canAccounts: can(me, "accounts"), canRequests: can(me, "requests") },
+    { roles, users: users.map(sanitizeUser), categories, masterDocs, accounts, txns, requests, notifs, audit }
+  );
+
+  return NextResponse.json({ me: sanitizeUser(me), ...shaped });
 }

@@ -5,6 +5,8 @@ import { getSessionUser, can } from "@/lib/auth";
 import { sendMailToUser } from "@/lib/mail";
 import { ORDER, STATUS, ADV_PERM, ADV_LABELS } from "@/lib/constants";
 import { seedDemo, ROLES } from "@/lib/seed-data.mjs";
+import { canManageRequestDocs } from "@/lib/permissions.mjs";
+import { advanceRequestTx } from "@/lib/requests.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
 const fmt = (n) => "฿" + Math.round(n).toLocaleString("en-US");
@@ -76,11 +78,11 @@ export async function POST(req) {
         if (i >= ORDER.length - 1) return err("Already closed.");
         const next = ORDER[i + 1];
         if (!admin && !can(me, ADV_PERM[next])) return err("Forbidden", 403);
-        await prisma.request.update({ where: { id: r.id }, data: { status: next } });
-        if (next === "disbursed") {
-          await prisma.account.update({ where: { id: "project" }, data: { balance: { decrement: r.amount } } });
-          await prisma.txn.create({ data: { acctId: "project", type: "out", amount: r.amount, desc: "Disbursement — " + r.title } });
-        }
+        const result = await advanceRequestTx(prisma, {
+          id: r.id, currentStatus: r.status, nextStatus: next,
+          isDisbursement: next === "disbursed", amount: r.amount, title: r.title,
+        });
+        if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
         const label = STATUS[next].label + (next === "disbursed" ? " (" + fmt(r.amount) + " transferred)" : "");
         await audit(me, "Advanced " + r.id + " to " + STATUS[next].label);
         await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — " + label + ".", next);
@@ -93,7 +95,7 @@ export async function POST(req) {
       case "detachDoc": {
         const r = await prisma.request.findUnique({ where: { id: body.id } });
         if (!r) return err("Not found", 404);
-        if (!admin && !can(me, "create") && r.requesterId !== me.id) return err("Forbidden", 403);
+        if (!canManageRequestDocs(me, r, admin)) return err("Forbidden", 403);
         const docs = r.docs;
         const doc = docs[body.idx];
         if (!doc) return err("Unknown document.");
@@ -133,7 +135,7 @@ export async function POST(req) {
       case "markFixed": {
         const r = await prisma.request.findUnique({ where: { id: body.id } });
         if (!r) return err("Not found", 404);
-        if (!admin && r.requesterId !== me.id && !can(me, "create")) return err("Forbidden", 403);
+        if (!canManageRequestDocs(me, r, admin)) return err("Forbidden", 403);
         const docs = r.docs;
         const doc = docs[body.idx];
         if (!doc || !doc.disc || !doc.disc.open) return err("No open discrepancy.");
