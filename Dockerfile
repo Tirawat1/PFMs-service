@@ -36,6 +36,15 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/prisma ./prisma
+
+# prisma/seed.mjs (via lib/seed-data.mjs) needs bcryptjs and its own source —
+# standalone output only bundles what Next's own server routes reference, and
+# it *inlines* bcryptjs into the compiled route chunks rather than leaving it
+# as a loose node_modules package. That's invisible to app routes (login
+# works fine) but breaks this script, which runs as plain `node` outside
+# Next's bundler and needs the real package present on disk.
+COPY --from=builder /app/lib ./lib
+COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
 COPY --from=builder /app/package.json ./package.json
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh && chown nextjs:nodejs ./docker-entrypoint.sh
