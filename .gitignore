@@ -46,3 +46,6 @@ terraform/*.tfvars
 /step_deploy.md
 /step_deploy_explained.md
 .env.smoketest
+
+# git worktrees used for isolated feature work
+.worktrees/
