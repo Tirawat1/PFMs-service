@@ -51,7 +51,7 @@ export async function POST(req) {
         const { title, categoryId, amount, desc, eventDate } = body;
         if (!title || !categoryId) return err("Fill title and category.");
         const cat = await prisma.category.findUnique({ where: { id: categoryId } });
-        if (!cat) return err("Unknown category.");
+        if (!cat || !cat.active) return err("Unknown category.");
         const parsedEventDate = eventDate ? new Date(eventDate) : new Date();
         const counter = await prisma.counter.update({
           where: { id: "request" },
@@ -198,6 +198,14 @@ export async function POST(req) {
       case "updateCategoryAccount": {
         if (!admin) return err("Forbidden", 403);
         await prisma.category.update({ where: { id: body.id }, data: { defaultAcctId: body.defaultAcctId || null } });
+        return NextResponse.json({ ok: true });
+      }
+      case "closeCategory": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        await prisma.category.update({ where: { id: c.id }, data: { active: false } });
+        await audit(me, "Closed category " + c.name);
         return NextResponse.json({ ok: true });
       }
       case "toggleCatDoc": {

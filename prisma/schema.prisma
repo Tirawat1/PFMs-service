@@ -38,6 +38,7 @@ model Category {
   docs          Json // array of document names
   notes         String  @default("")
   defaultAcctId String?
+  active        Boolean @default(true) // soft-close, never hard-delete — existing requests still reference categoryId
 }
 
 model MasterDoc {
