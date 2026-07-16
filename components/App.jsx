@@ -61,7 +61,7 @@ export default function App() {
     if (r.error) { showToast("⚠ " + r.error); return false; }
     await refresh();
     if (okMsg) showToast(okMsg);
-    return true;
+    return r;
   }, [refresh, showToast]);
 
   const go = (s, extra = {}) => { setScreen(s); setDetailId(extra.detailId || null); setCatId(extra.catId || null); setNavOpen(false); };
@@ -175,6 +175,8 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   const accts = data.accounts;
   const activeAccts = accts.filter((a) => a.active);
   const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
+  const activeAccts = accts.filter((a) => a.active);
+  const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
   const inflow = data.txns.filter((t) => t.type === "in").reduce((s, t) => s + t.amount, 0);
   const outflow = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
   const pending = data.requests.filter((r) => r.status !== "closed");
@@ -208,6 +210,9 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
       </div>
     )}
     <div className="stats">
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
@@ -576,7 +581,12 @@ function Notifs({ data, rpc }) {
 function Settings({ me, data, admin, rpc }) {
   const [email, setEmail] = useState(me.email || "");
   const [notify, setNotify] = useState(!!me.emailNotify);
+  const [lastSync, setLastSync] = useState(null);
   const save = (nextNotify, nextEmail) => rpc("updateSettings", { email: nextEmail ?? email, emailNotify: nextNotify ?? notify }, "Settings saved.");
+  const runBackup = async () => {
+    const r = await rpc("backupToSheets", {}, "Backup synced to Google Sheets.");
+    if (r && r.syncedAt) setLastSync(r.syncedAt);
+  };
   return (<>
     <div className="pagehead"><div><h1 className="h1 dsp">Settings</h1><p className="sub">Personal preferences for your account.</p></div></div>
     <div className="panel" style={{ maxWidth: 560 }}>
@@ -588,6 +598,14 @@ function Settings({ me, data, admin, rpc }) {
       <div className="field"><label className="label">Email address</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => save(undefined, email)} placeholder="you@example.com" /></div>
       <div className="dim" style={{ fontSize: 12 }}>Emails are sent only when the server has SMTP configured; in-app notifications always work.</div>
     </div>
+    {admin && (
+      <div className="panel" style={{ maxWidth: 560 }}>
+        <h3 className="panel-t" style={{ marginBottom: 10 }}>Google Sheets backup</h3>
+        <p className="dim" style={{ fontSize: 13, margin: "0 0 14px" }}>Mirrors requests, documents, accounts, transactions and the audit trail into a Google Sheet as a human-readable backup.</p>
+        <button className="btn btn-ghost" onClick={runBackup}><i className="ph ph-cloud-arrow-up" /> Backup now</button>
+        {lastSync && <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>Last synced: {new Date(lastSync).toLocaleString()}</div>}
+      </div>
+    )}
     {admin && data.requests.length === 0 && (
       <div className="panel" style={{ maxWidth: 560 }}>
         <h3 className="panel-t" style={{ marginBottom: 10 }}>Demo data</h3>

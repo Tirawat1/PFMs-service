@@ -7,6 +7,7 @@ import { ORDER, STATUS, ADV_PERM, ADV_LABELS } from "@/lib/constants";
 import { seedDemo, ROLES } from "@/lib/seed-data.mjs";
 import { canManageRequestDocs } from "@/lib/permissions.mjs";
 import { advanceRequestTx, resolveDisburseAccount } from "@/lib/requests.mjs";
+import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
 const fmt = (n) => "฿" + Math.round(n).toLocaleString("en-US");
@@ -351,6 +352,13 @@ export async function POST(req) {
         await seedDemo(prisma, roleIds);
         await audit(me, "Loaded demo dataset");
         return NextResponse.json({ ok: true });
+      }
+      case "backupToSheets": {
+        if (!admin) return err("Forbidden", 403);
+        const result = await syncToSheets({ prisma });
+        if (!result.ok) return err(result.error, 502);
+        await audit(me, "Ran Google Sheets backup sync");
+        return NextResponse.json({ ok: true, syncedAt: result.syncedAt });
       }
 
       default:
