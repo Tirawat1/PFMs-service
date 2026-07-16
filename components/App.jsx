@@ -198,7 +198,7 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Financial <span className="gradt">Overview</span></h1><p className="sub">Money across accounts, reimbursement progress, and disbursement activity.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories[0]?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
     </div>
     {showBanks && fac && prj && (
       <div className="bankgrid">
@@ -260,7 +260,7 @@ function Requests({ data, can, lang, catName, catAlt, go, setModal, setForm, req
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Reimbursements</h1><p className="sub">Track each request from document submission to fund disbursement.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories[0]?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New request</button>}
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New request</button>}
     </div>
     <div className="seg">{filters.map((f) => <button key={f.k} className={reqFilter === f.k ? "on" : ""} onClick={() => setReqFilter(f.k)}>{f.l}</button>)}</div>
     <div className="panel" style={{ padding: "8px 8px 4px" }}>
@@ -357,7 +357,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         <div><div className="label" style={{ marginBottom: 5 }}>Description</div><div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{r.desc || "Reimbursement request submitted by " + r.requesterName + "."}</div></div>
         {c && c.notes && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--soft)", border: "1px solid rgba(240,55,138,.2)" }}><div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent2)", marginBottom: 5 }}><i className="ph ph-info" /> Category note</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{c.notes}</div></div>}
         {r.acctId && (
-          <div style={{ padding: "13px 15px", borderRadius: 12, background: "#180d15", border: "1px solid var(--line2)" }}>
+          <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
             <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-bank" /> Disbursed from</div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{data.accounts.find((a) => a.id === r.acctId)?.name || r.acctId}</div>
             {r.disburseProofLink && <a href={r.disburseProofLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: "#7cb3ff" }}>View transfer proof ↗</a>}
@@ -372,7 +372,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
 }
 
 /* ---------- Categories ---------- */
-function Categories({ data, admin, catName, catAlt, go, setModal, setForm }) {
+function Categories({ data, admin, catName, catAlt, go, setModal, setForm, rpc }) {
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Expense <span className="gradt">Categories</span></h1><p className="sub">Each category defines the required documents for reimbursement.{admin ? " Tap a category to edit its checklist." : ""}</p></div>
@@ -380,10 +380,11 @@ function Categories({ data, admin, catName, catAlt, go, setModal, setForm }) {
     </div>
     <div className="grid3">
       {data.categories.map((c) => (
-        <div key={c.id} className="catcard" onClick={() => admin && go("catedit", { catId: c.id })}>
+        <div key={c.id} className="catcard" style={c.active === false ? { opacity: 0.55 } : {}} onClick={() => admin && go("catedit", { catId: c.id })}>
           <div className="fx ac jb"><div className="acct-ic grad" style={{ width: 40, height: 40, fontSize: 19 }}><i className={"ph " + c.icon} /></div><span className="tag">{c.docs.length} docs</span></div>
-          <div><div style={{ fontWeight: 800, fontSize: 15.5 }}>{catName(c)}</div><div className="dim th" style={{ fontSize: 13, marginTop: 2 }}>{catAlt(c)}</div></div>
+          <div><div style={{ fontWeight: 800, fontSize: 15.5 }}>{catName(c)}{c.active === false && <span className="dim" style={{ fontSize: 11.5, marginLeft: 8 }}>(closed)</span>}</div><div className="dim th" style={{ fontSize: 13, marginTop: 2 }}>{catAlt(c)}</div></div>
           {c.notes && <div className="dim th" style={{ fontSize: 12, lineHeight: 1.4, borderTop: "1px solid var(--line)", paddingTop: 10 }}><i className="ph ph-info" style={{ color: "var(--accent2)" }} /> {c.notes}</div>}
+          {admin && c.active !== false && <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); rpc("closeCategory", { id: c.id }, "Category closed."); }}><i className="ph ph-x" /> Close</button>}
         </div>
       ))}
     </div>
@@ -464,9 +465,9 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
                 )}
               </div>
               <div className="fx" style={{ marginTop: 16, gap: 12, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 120, background: "#180d15", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>BALANCE</div><div className="mono" style={{ fontWeight: 800, fontSize: 20 }}>{fmt(a.balance)}</div></div>
-                <div style={{ flex: 1, minWidth: 100, background: "#180d15", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>IN</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(inf)}</div></div>
-                <div style={{ flex: 1, minWidth: 100, background: "#180d15", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>OUT</div><div className="mono neg" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(outf)}</div></div>
+                <div style={{ flex: 1, minWidth: 120, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>BALANCE</div><div className="mono" style={{ fontWeight: 800, fontSize: 20 }}>{fmt(a.balance)}</div></div>
+                <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>IN</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(inf)}</div></div>
+                <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>OUT</div><div className="mono neg" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(outf)}</div></div>
               </div>
             </div>
           );
@@ -626,7 +627,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
 
         {modal.type === "newRequest" && (<>
           <div className="field"><label className="label">Title</label><input className="input" value={form.title || ""} onChange={set("title")} placeholder="e.g. Snacks for opening ceremony" /></div>
-          <div className="field"><label className="label">Expense category</label><select className="input" value={form.categoryId || ""} onChange={set("categoryId")}>{data.categories.map((c) => <option key={c.id} value={c.id}>{catName(c)}</option>)}</select></div>
+          <div className="field"><label className="label">Expense category</label><select className="input" value={form.categoryId || ""} onChange={set("categoryId")}>{data.categories.filter((c) => c.active !== false).map((c) => <option key={c.id} value={c.id}>{catName(c)}</option>)}</select></div>
           <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
           <div className="field"><label className="label">Event date (when the expense actually happened)</label><input className="input" type="date" value={form.eventDate || ""} onChange={set("eventDate")} /></div>
           <div className="field"><label className="label">Description</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.desc || ""} onChange={set("desc")} placeholder="Purpose of this expense…" /></div>
