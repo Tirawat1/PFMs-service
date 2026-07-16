@@ -173,7 +173,8 @@ function Login({ onLoggedIn }) {
 /* ---------- Dashboard ---------- */
 function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm }) {
   const accts = data.accounts;
-  const totalBal = accts.reduce((s, a) => s + a.balance, 0);
+  const activeAccts = accts.filter((a) => a.active);
+  const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
   const inflow = data.txns.filter((t) => t.type === "in").reduce((s, t) => s + t.amount, 0);
   const outflow = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
   const pending = data.requests.filter((r) => r.status !== "closed");
@@ -182,7 +183,7 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   const io = (id, type) => data.txns.filter((t) => t.acctId === id && t.type === type).reduce((s, t) => s + t.amount, 0);
   const spend = {};
   data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { spend[r.categoryId] = (spend[r.categoryId] || 0) + r.amount; });
-  const palette = ["#f0378a", "#a855f7", "#3fd8a4", "#f5b544", "#60a5fa", "#ff6b9a", "#22d3ee"];
+  const palette = ["#f0378a", "#a855f7", "#3fd8a4", "#f5b544", "#60a5fa", "#e11d48", "#22d3ee"];
   const ents = Object.entries(spend).map(([cid, amt]) => ({ label: (data.categories.find((c) => c.id === cid) && catName(data.categories.find((c) => c.id === cid))) || cid, amount: amt })).sort((a, b) => b.amount - a.amount);
   const totalSpend = ents.reduce((s, e) => s + e.amount, 0) || 1;
 
@@ -197,7 +198,7 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Financial <span className="gradt">Overview</span></h1><p className="sub">Money across accounts, reimbursement progress, and disbursement activity.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories[0]?.id, amount: "" }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories[0]?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
     </div>
     {showBanks && fac && prj && (
       <div className="bankgrid">
@@ -207,15 +208,15 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
       </div>
     )}
     <div className="stats">
-      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "#ff8bb5" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{accts.length} accounts</div></div>}
-      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(63,216,164,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
-      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(255,107,154,.14)", color: "#ff6b9a" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
       <div className="stat"><div className="stat-ic" style={{ background: "rgba(245,181,68,.14)", color: "var(--amber)" }}><i className="ph ph-hourglass-medium" /></div><div className="stat-v mono">{pending.length}</div><div className="stat-l">Pending reimbursements</div><div className="stat-s dim">{fmt(pending.reduce((s, r) => s + r.amount, 0))} in progress</div></div>
     </div>
     <div className="grid2">
       <div className="panel">
         <div className="fx ac jb" style={{ marginBottom: 16 }}><h3 className="panel-t">Reimbursement pipeline</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{data.requests.length} requests</span></div>
-        <div className="pipe">{ORDER.map((k) => <div key={k} className="pipe-cell"><div className="pipe-n" style={{ color: k === "disbursed" ? "#ff77ab" : k === "closed" ? "var(--mut)" : "var(--txt)" }}>{data.requests.filter((r) => r.status === k).length}</div><div className="pipe-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div>
+        <div className="pipe">{ORDER.map((k) => <div key={k} className="pipe-cell"><div className="pipe-n" style={{ color: k === "disbursed" ? "var(--accent2)" : k === "closed" ? "var(--mut)" : "var(--txt)" }}>{data.requests.filter((r) => r.status === k).length}</div><div className="pipe-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div>
       </div>
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 4 }}>Spending by category</h3>
@@ -245,7 +246,7 @@ function TxnRow({ t, accounts }) {
   const isIn = t.type === "in";
   return (
     <div className="fx ac gap12" style={{ padding: "11px 0", borderTop: "1px solid var(--line)" }}>
-      <div className="acct-ic" style={{ width: 34, height: 34, fontSize: 15, background: isIn ? "rgba(63,216,164,.14)" : "rgba(255,107,154,.14)", color: isIn ? "var(--green)" : "#ff6b9a" }}><i className={"ph " + (isIn ? "ph-arrow-down-left" : "ph-arrow-up-right")} /></div>
+      <div className="acct-ic" style={{ width: 34, height: 34, fontSize: 15, background: isIn ? "rgba(15,157,107,.14)" : "rgba(225,29,72,.12)", color: isIn ? "var(--green)" : "#e11d48" }}><i className={"ph " + (isIn ? "ph-arrow-down-left" : "ph-arrow-up-right")} /></div>
       <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc}</div><div className="dim" style={{ fontSize: 11 }}>{acc ? acc.name : t.acctId} · {fmtDate(t.date)}</div></div>
       <div className={"mono " + (isIn ? "pos" : "neg")} style={{ fontWeight: 800, fontSize: 13.5 }}>{(isIn ? "+" : "−") + fmt(t.amount)}</div>
     </div>
@@ -259,7 +260,7 @@ function Requests({ data, can, lang, catName, catAlt, go, setModal, setForm, req
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Reimbursements</h1><p className="sub">Track each request from document submission to fund disbursement.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories[0]?.id, amount: "" }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New request</button>}
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories[0]?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New request</button>}
     </div>
     <div className="seg">{filters.map((f) => <button key={f.k} className={reqFilter === f.k ? "on" : ""} onClick={() => setReqFilter(f.k)}>{f.l}</button>)}</div>
     <div className="panel" style={{ padding: "8px 8px 4px" }}>
@@ -302,7 +303,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
   return (<>
     <div className="fx ac gap12" style={{ flexWrap: "wrap" }}>
       <button className="iconbtn" onClick={() => go("requests")}><i className="ph ph-arrow-left" /></button>
-      <div><h1 className="h1 dsp" style={{ fontSize: 27 }}>{r.title}</h1><div className="dim" style={{ fontSize: 13, marginTop: 4 }}>{r.id} · created {fmtDate(r.createdAt)}</div></div>
+      <div><h1 className="h1 dsp" style={{ fontSize: 27 }}>{r.title}</h1><div className="dim" style={{ fontSize: 13, marginTop: 4 }}>{r.id} · event {fmtDate(r.eventDate)} · created {fmtDate(r.createdAt)}</div></div>
       <span className={"badge st-" + r.status} style={{ marginLeft: "auto", fontSize: 13, padding: "8px 15px" }}>{lang === "th" ? st.th : st.label}</span>
     </div>
     <div className="panel"><div className="steps">{ORDER.map((k, i) => <div key={k} className={"step" + (i < ci ? " done" : i === ci ? " cur" : "")}><div className="step-d"><i className={"ph " + STATUS[k].icon} /></div><div className="step-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div></div>
@@ -333,7 +334,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
                     <div className={"disc-box" + (disc.fixed ? " fixed" : "")}>
                       <div style={{ fontWeight: 800, marginBottom: 3 }}><i className="ph ph-warning" /> Discrepancy — flagged by {disc.by} · {fmtTime(disc.ts)}</div>
                       <div className="muted th">{disc.note || "Please revise this document."}</div>
-                      {disc.fixed && <div style={{ marginTop: 6, color: "#7cb3ff", fontWeight: 700 }}><i className="ph ph-arrows-clockwise" /> Marked as revised{disc.fixedNote ? ": " + disc.fixedNote : ""} — awaiting officer re-check.</div>}
+                      {disc.fixed && <div style={{ marginTop: 6, color: "#0e7490", fontWeight: 700 }}><i className="ph ph-arrows-clockwise" /> Marked as revised{disc.fixedNote ? ": " + disc.fixedNote : ""} — awaiting officer re-check.</div>}
                       <div className="fx gap8" style={{ marginTop: 9, flexWrap: "wrap" }}>
                         {(isRequester || can("create")) && !disc.fixed && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ note: "" }); setModal({ type: "markFixed", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-arrows-clockwise" /> I changed the document</button>}
                         {canOfficer && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("resolveDiscrepancy", { id: r.id, idx: i }, "Discrepancy marked solved.")}><i className="ph ph-check" /> Case solved</button>}
@@ -354,8 +355,16 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
           <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Department</div><div style={{ fontWeight: 700 }}>{r.dept}</div></div>
         </div>
         <div><div className="label" style={{ marginBottom: 5 }}>Description</div><div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{r.desc || "Reimbursement request submitted by " + r.requesterName + "."}</div></div>
-        {c && c.notes && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--soft)", border: "1px solid rgba(240,55,138,.2)" }}><div style={{ fontSize: 12, fontWeight: 800, color: "#ff8bb5", marginBottom: 5 }}><i className="ph ph-info" /> Category note</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{c.notes}</div></div>}
-        {canAdv && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
+        {c && c.notes && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--soft)", border: "1px solid rgba(240,55,138,.2)" }}><div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent2)", marginBottom: 5 }}><i className="ph ph-info" /> Category note</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{c.notes}</div></div>}
+        {r.acctId && (
+          <div style={{ padding: "13px 15px", borderRadius: 12, background: "#180d15", border: "1px solid var(--line2)" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-bank" /> Disbursed from</div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{data.accounts.find((a) => a.id === r.acctId)?.name || r.acctId}</div>
+            {r.disburseProofLink && <a href={r.disburseProofLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: "#7cb3ff" }}>View transfer proof ↗</a>}
+          </div>
+        )}
+        {canAdv && nextKey !== "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
+        {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "" }); setModal({ type: "disburse", reqId: r.id }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {!canAdv && nextKey && <div className="dim" style={{ fontSize: 12.5, textAlign: "center", padding: 10, border: "1px dashed var(--line2)", borderRadius: 11, marginTop: "auto" }}>Next step ({ADV_LABELS[nextKey]}) is handled by another role.</div>}
       </div>
     </div>
@@ -374,7 +383,7 @@ function Categories({ data, admin, catName, catAlt, go, setModal, setForm }) {
         <div key={c.id} className="catcard" onClick={() => admin && go("catedit", { catId: c.id })}>
           <div className="fx ac jb"><div className="acct-ic grad" style={{ width: 40, height: 40, fontSize: 19 }}><i className={"ph " + c.icon} /></div><span className="tag">{c.docs.length} docs</span></div>
           <div><div style={{ fontWeight: 800, fontSize: 15.5 }}>{catName(c)}</div><div className="dim th" style={{ fontSize: 13, marginTop: 2 }}>{catAlt(c)}</div></div>
-          {c.notes && <div className="dim th" style={{ fontSize: 12, lineHeight: 1.4, borderTop: "1px solid var(--line)", paddingTop: 10 }}><i className="ph ph-info" style={{ color: "#ff8bb5" }} /> {c.notes}</div>}
+          {c.notes && <div className="dim th" style={{ fontSize: 12, lineHeight: 1.4, borderTop: "1px solid var(--line)", paddingTop: 10 }}><i className="ph ph-info" style={{ color: "var(--accent2)" }} /> {c.notes}</div>}
         </div>
       ))}
     </div>
@@ -397,6 +406,13 @@ function CatEdit({ data, go, rpc, catId }) {
           <label className="label">Category note (thresholds, vendor rules, deadlines…)</label>
           <textarea className="input th" style={{ minHeight: 80, resize: "vertical" }} value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => rpc("updateCategoryNotes", { id: c.id, notes: note })} />
         </div>
+        <div style={{ marginTop: 16 }}>
+          <label className="label">Default source account</label>
+          <select className="input" value={c.defaultAcctId || ""} onChange={(e) => rpc("updateCategoryAccount", { id: c.id, defaultAcctId: e.target.value || null })}>
+            <option value="">No default — officer picks at disbursement</option>
+            {data.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
       </div>
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 6 }}>Add from document menu</h3>
@@ -418,17 +434,35 @@ function CatEdit({ data, go, rpc, catId }) {
 }
 
 /* ---------- Accounts ---------- */
-function Accounts({ data }) {
+function Accounts({ data, admin, rpc, setModal, setForm }) {
+  const totalSpent = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
+  const totalRemaining = data.accounts.filter((a) => a.active).reduce((s, a) => s + a.balance, 0);
   return (<>
-    <div className="pagehead"><div><h1 className="h1 dsp">Accounts</h1><p className="sub">Cash inflows and outflows by account, with current available balances.</p></div></div>
+    <div className="pagehead">
+      <div><h1 className="h1 dsp">Accounts</h1><p className="sub">Cash inflows and outflows by account, with current available balances.</p></div>
+      {admin && <button className="btn btn-primary grad" onClick={() => { setForm({ name: "", nameTh: "", icon: "ph-bank" }); setModal({ type: "newAccount" }); }}><i className="ph ph-plus" /> New account</button>}
+    </div>
+    <div className="stats">
+      <div className="stat"><div className="stat-ic" style={{ background: "rgba(255,107,154,.14)", color: "#ff6b9a" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(totalSpent)}</div><div className="stat-l">Total spent</div><div className="stat-s dim">disbursed reimbursements</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "#ff8bb5" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalRemaining)}</div><div className="stat-l">Total remaining</div><div className="stat-s dim">across active accounts</div></div>
+    </div>
     <div className="grid2">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {data.accounts.map((a) => {
           const inf = data.txns.filter((t) => t.acctId === a.id && t.type === "in").reduce((s, t) => s + t.amount, 0);
           const outf = data.txns.filter((t) => t.acctId === a.id && t.type === "out").reduce((s, t) => s + t.amount, 0);
           return (
-            <div key={a.id} className="panel">
-              <div className="fx ac gap14"><div className="acct-ic grad" style={{ width: 48, height: 48, fontSize: 23 }}><i className={"ph " + a.icon} /></div><div style={{ flex: 1 }}><div style={{ fontWeight: 800, fontSize: 16 }}>{a.name}</div><div className="dim th" style={{ fontSize: 12.5 }}>{a.nameTh}</div></div></div>
+            <div key={a.id} className="panel" style={a.active ? {} : { opacity: 0.55 }}>
+              <div className="fx ac gap14">
+                <div className="acct-ic grad" style={{ width: 48, height: 48, fontSize: 23 }}><i className={"ph " + a.icon} /></div>
+                <div style={{ flex: 1 }}><div style={{ fontWeight: 800, fontSize: 16 }}>{a.name}{!a.active && <span className="dim" style={{ fontSize: 11.5, marginLeft: 8 }}>(closed)</span>}</div><div className="dim th" style={{ fontSize: 12.5 }}>{a.nameTh}</div></div>
+                {admin && a.active && (
+                  <div className="fx gap8">
+                    <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ acctId: a.id, amount: "", desc: "" }); setModal({ type: "addFunds", acctId: a.id, acctName: a.name }); }}><i className="ph ph-plus" /> Add funds</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => rpc("closeAccount", { id: a.id }, "Account closed.")}><i className="ph ph-x" /> Close</button>
+                  </div>
+                )}
+              </div>
               <div className="fx" style={{ marginTop: 16, gap: 12, flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 120, background: "#180d15", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>BALANCE</div><div className="mono" style={{ fontWeight: 800, fontSize: 20 }}>{fmt(a.balance)}</div></div>
                 <div style={{ flex: 1, minWidth: 100, background: "#180d15", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>IN</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(inf)}</div></div>
@@ -507,15 +541,15 @@ function AuditTrail({ data }) {
 /* ---------- Notifications ---------- */
 function Notifs({ data, rpc }) {
   const meta = {
-    notified: { i: "ph-megaphone", c: "var(--amber)", bg: "rgba(245,181,68,.14)" },
-    docs_submitted: { i: "ph-files", c: "#7cb3ff", bg: "rgba(96,165,250,.14)" },
-    verified: { i: "ph-seal-check", c: "#b79cff", bg: "rgba(167,139,250,.16)" },
-    disbursed: { i: "ph-hand-coins", c: "#ff77ab", bg: "rgba(240,55,138,.16)" },
-    purchase_complete: { i: "ph-shopping-bag", c: "var(--green)", bg: "rgba(63,216,164,.14)" },
-    closed: { i: "ph-check-circle", c: "var(--green)", bg: "rgba(63,216,164,.14)" },
-    discrepancy: { i: "ph-warning", c: "var(--amber)", bg: "rgba(245,181,68,.14)" },
-    fixed: { i: "ph-arrows-clockwise", c: "#7cb3ff", bg: "rgba(96,165,250,.14)" },
-    solved: { i: "ph-check-circle", c: "var(--green)", bg: "rgba(63,216,164,.14)" },
+    notified: { i: "ph-megaphone", c: "var(--amber)", bg: "rgba(245,181,68,.16)" },
+    docs_submitted: { i: "ph-files", c: "#0e7490", bg: "rgba(8,145,178,.14)" },
+    verified: { i: "ph-seal-check", c: "#7c3aed", bg: "rgba(124,58,237,.14)" },
+    disbursed: { i: "ph-hand-coins", c: "var(--accent2)", bg: "var(--soft)" },
+    purchase_complete: { i: "ph-shopping-bag", c: "var(--green)", bg: "rgba(15,157,107,.14)" },
+    closed: { i: "ph-check-circle", c: "var(--green)", bg: "rgba(15,157,107,.14)" },
+    discrepancy: { i: "ph-warning", c: "var(--amber)", bg: "rgba(245,181,68,.16)" },
+    fixed: { i: "ph-arrows-clockwise", c: "#0e7490", bg: "rgba(8,145,178,.14)" },
+    solved: { i: "ph-check-circle", c: "var(--green)", bg: "rgba(15,157,107,.14)" },
   };
   return (<>
     <div className="pagehead">
@@ -567,7 +601,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed" };
+  const titles = { newRequest: "New reimbursement request", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -579,6 +613,9 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "attach") ok = await rpc("attachDoc", { id: modal.reqId, idx: modal.idx, link: form.link, fileName: form.fileName }, "Document submitted.");
     else if (modal.type === "flagDisc") ok = await rpc("flagDiscrepancy", { id: modal.reqId, idx: modal.idx, note: form.note }, "Discrepancy flagged — requester notified.");
     else if (modal.type === "markFixed") ok = await rpc("markFixed", { id: modal.reqId, idx: modal.idx, note: form.note }, "Officer notified of the change.");
+    else if (modal.type === "disburse") ok = await rpc("advanceRequest", { id: modal.reqId, acctId: form.acctId, proofLink: form.proofLink }, "Funds disbursed.");
+    else if (modal.type === "newAccount") ok = await rpc("createAccount", form, "Account created.");
+    else if (modal.type === "addFunds") ok = await rpc("addFunds", { acctId: modal.acctId, amount: form.amount, desc: form.desc }, "Funds added.");
     if (ok) close();
   };
 
@@ -591,6 +628,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Title</label><input className="input" value={form.title || ""} onChange={set("title")} placeholder="e.g. Snacks for opening ceremony" /></div>
           <div className="field"><label className="label">Expense category</label><select className="input" value={form.categoryId || ""} onChange={set("categoryId")}>{data.categories.map((c) => <option key={c.id} value={c.id}>{catName(c)}</option>)}</select></div>
           <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
+          <div className="field"><label className="label">Event date (when the expense actually happened)</label><input className="input" type="date" value={form.eventDate || ""} onChange={set("eventDate")} /></div>
           <div className="field"><label className="label">Description</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.desc || ""} onChange={set("desc")} placeholder="Purpose of this expense…" /></div>
           {selCat && selCat.docs.length > 0 && <div className="field"><label className="label">Documents required for this category</label><div className="chipwrap">{selCat.docs.map((d) => <span key={d} className="doc-chip th" style={{ padding: "5px 10px", fontSize: 12 }}>{d}</span>)}</div></div>}
         </>)}
@@ -644,7 +682,27 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>The officer who flagged this will be notified to re-check.</div>
         </>)}
 
-        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : "Submit"}</button>
+        {modal.type === "disburse" && (<>
+          <div className="field"><label className="label">Source account</label><select className="input" value={form.acctId || ""} onChange={set("acctId")}>
+            <option value="" disabled>Select an account…</option>
+            {data.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select></div>
+          <div className="field"><label className="label">Transfer proof link</label><input className="input" value={form.proofLink || ""} onChange={set("proofLink")} placeholder="https://… (bank transfer slip / statement)" /></div>
+          <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Funds will be deducted from this account immediately.</div>
+        </>)}
+
+        {modal.type === "newAccount" && (<>
+          <div className="field"><label className="label">Account name (EN)</label><input className="input" value={form.name || ""} onChange={set("name")} placeholder="e.g. Department Petty Cash" /></div>
+          <div className="field"><label className="label">ชื่อบัญชี (TH)</label><input className="input th" value={form.nameTh || ""} onChange={set("nameTh")} /></div>
+        </>)}
+
+        {modal.type === "addFunds" && (<>
+          <div className="drive-banner" style={{ marginBottom: 18 }}><i className="ph ph-bank" /><span>Adding funds to — <b>{modal.acctName}</b></span></div>
+          <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
+          <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
+        </>)}
+
+        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
       </div>
     </div>
   );

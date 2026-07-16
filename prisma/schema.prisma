@@ -31,12 +31,13 @@ model User {
 }
 
 model Category {
-  id     String @id @default(cuid())
-  name   String
-  nameTh String @default("")
-  icon   String @default("ph-tag")
-  docs   Json // array of document names
-  notes  String @default("")
+  id            String  @id @default(cuid())
+  name          String
+  nameTh        String  @default("")
+  icon          String  @default("ph-tag")
+  docs          Json // array of document names
+  notes         String  @default("")
+  defaultAcctId String?
 }
 
 model MasterDoc {
@@ -45,11 +46,12 @@ model MasterDoc {
 }
 
 model Account {
-  id      String @id // "faculty" | "project"
+  id      String  @id @default(cuid()) // "faculty" | "project" seeded explicitly; new accounts get a generated id
   name    String
-  nameTh  String @default("")
-  icon    String @default("ph-bank")
-  balance Float  @default(0)
+  nameTh  String  @default("")
+  icon    String  @default("ph-bank")
+  balance Float   @default(0)
+  active  Boolean @default(true)
 }
 
 model Txn {
@@ -62,21 +64,24 @@ model Txn {
 }
 
 model Request {
-  id            String   @id // e.g. RB-1042
-  title         String
-  categoryId    String
-  amount        Float
-  dept          String
-  requesterId   String?
-  requesterName String
-  status        String   @default("notified")
-  desc          String   @default("")
-  driveFolder   String   @default("")
+  id                String   @id // e.g. RB-1042
+  title             String
+  categoryId        String
+  amount            Float
+  dept              String
+  requesterId       String?
+  requesterName     String
+  status            String   @default("notified")
+  desc              String   @default("")
+  driveFolder       String   @default("")
   // docs: [{name, submitted, link, fileName,
   //          disc: {open, note, by, ts, fixed, fixedNote} | null}]
-  docs          Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  docs              Json
+  eventDate         DateTime @default(now())
+  acctId            String?
+  disburseProofLink String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model Notification {

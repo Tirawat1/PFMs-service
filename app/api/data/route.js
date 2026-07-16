@@ -23,7 +23,7 @@ export async function GET() {
     ]);
 
   const shaped = shapeSnapshot(
-    { admin, canAccounts: can(me, "accounts"), canRequests: can(me, "requests") },
+    { admin, canAccounts: can(me, "accounts"), canDisburse: can(me, "disburse"), canRequests: can(me, "requests") },
     { roles, users: users.map(sanitizeUser), categories, masterDocs, accounts, txns, requests, notifs, audit }
   );
 

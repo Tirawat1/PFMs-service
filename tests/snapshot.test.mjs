@@ -41,3 +41,15 @@ test("non-admin users list is always empty (regression guard)", () => {
   const shaped = shapeSnapshot({ admin: false, canAccounts: true, canRequests: true }, raw);
   assert.deepEqual(shaped.users, []);
 });
+
+test("non-admin with neither 'accounts' nor 'disburse' still gets empty accounts/txns (regression guard)", () => {
+  const shaped = shapeSnapshot({ admin: false, canAccounts: false, canDisburse: false, canRequests: true }, raw);
+  assert.deepEqual(shaped.accounts, []);
+  assert.deepEqual(shaped.txns, []);
+});
+
+test("non-admin with the 'disburse' permission (but not 'accounts') gets accounts/txns", () => {
+  const shaped = shapeSnapshot({ admin: false, canAccounts: false, canDisburse: true, canRequests: true }, raw);
+  assert.deepEqual(shaped.accounts, raw.accounts);
+  assert.deepEqual(shaped.txns, raw.txns);
+});
