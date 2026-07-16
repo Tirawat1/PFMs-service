@@ -6,7 +6,7 @@ import { sendMailToUser } from "@/lib/mail";
 import { ORDER, STATUS, ADV_PERM, ADV_LABELS } from "@/lib/constants";
 import { seedDemo, ROLES } from "@/lib/seed-data.mjs";
 import { canManageRequestDocs } from "@/lib/permissions.mjs";
-import { advanceRequestTx } from "@/lib/requests.mjs";
+import { advanceRequestTx, resolveDisburseAccount } from "@/lib/requests.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
 const fmt = (n) => "฿" + Math.round(n).toLocaleString("en-US");
@@ -48,10 +48,11 @@ export async function POST(req) {
       // ---------- requests ----------
       case "createRequest": {
         if (!can(me, "create")) return err("Forbidden", 403);
-        const { title, categoryId, amount, desc } = body;
+        const { title, categoryId, amount, desc, eventDate } = body;
         if (!title || !categoryId) return err("Fill title and category.");
         const cat = await prisma.category.findUnique({ where: { id: categoryId } });
         if (!cat) return err("Unknown category.");
+        const parsedEventDate = eventDate ? new Date(eventDate) : new Date();
         const counter = await prisma.counter.update({
           where: { id: "request" },
           data: { value: { increment: 1 } },
@@ -62,6 +63,7 @@ export async function POST(req) {
             id, title, categoryId, amount: Number(amount) || 0,
             dept: me.dept, requesterId: me.id, requesterName: me.name,
             desc: desc || "", status: "notified",
+            eventDate: isNaN(parsedEventDate) ? new Date() : parsedEventDate,
             docs: cat.docs.map((name) => ({ name, submitted: false, link: null, fileName: null, disc: null })),
             driveFolder: "https://drive.google.com/drive/folders/PFMS-" + id,
           },
@@ -78,13 +80,29 @@ export async function POST(req) {
         if (i >= ORDER.length - 1) return err("Already closed.");
         const next = ORDER[i + 1];
         if (!admin && !can(me, ADV_PERM[next])) return err("Forbidden", 403);
+
+        let acctId, proofLink, acctName;
+        if (next === "disbursed") {
+          const cat = await prisma.category.findUnique({ where: { id: r.categoryId } });
+          const candidateId = body.acctId || cat?.defaultAcctId;
+          const account = candidateId ? await prisma.account.findUnique({ where: { id: candidateId } }) : null;
+          const resolved = resolveDisburseAccount({
+            providedAcctId: body.acctId, categoryDefaultAcctId: cat?.defaultAcctId,
+            account, proofLink: body.proofLink,
+          });
+          if (resolved.error) return err(resolved.error);
+          ({ acctId, proofLink } = resolved);
+          acctName = account?.name || acctId;
+        }
+
         const result = await advanceRequestTx(prisma, {
           id: r.id, currentStatus: r.status, nextStatus: next,
           isDisbursement: next === "disbursed", amount: r.amount, title: r.title,
+          acctId, proofLink,
         });
         if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
         const label = STATUS[next].label + (next === "disbursed" ? " (" + fmt(r.amount) + " transferred)" : "");
-        await audit(me, "Advanced " + r.id + " to " + STATUS[next].label);
+        await audit(me, "Advanced " + r.id + " to " + STATUS[next].label + (next === "disbursed" ? " from account " + acctName : ""));
         await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — " + label + ".", next);
         await notifyPerm("disburse", r.id + " — " + label + ".", next, me.id);
         return NextResponse.json({ ok: true });
@@ -166,13 +184,20 @@ export async function POST(req) {
       case "createCategory": {
         if (!admin) return err("Forbidden", 403);
         if (!body.name) return err("Enter a category name.");
-        await prisma.category.create({ data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docs: [] } });
+        await prisma.category.create({
+          data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docs: [], defaultAcctId: body.defaultAcctId || null },
+        });
         await audit(me, "Created category " + body.name);
         return NextResponse.json({ ok: true });
       }
       case "updateCategoryNotes": {
         if (!admin) return err("Forbidden", 403);
         await prisma.category.update({ where: { id: body.id }, data: { notes: body.notes || "" } });
+        return NextResponse.json({ ok: true });
+      }
+      case "updateCategoryAccount": {
+        if (!admin) return err("Forbidden", 403);
+        await prisma.category.update({ where: { id: body.id }, data: { defaultAcctId: body.defaultAcctId || null } });
         return NextResponse.json({ ok: true });
       }
       case "toggleCatDoc": {
@@ -206,6 +231,47 @@ export async function POST(req) {
       case "removeMasterDoc": {
         if (!admin) return err("Forbidden", 403);
         await prisma.masterDoc.deleteMany({ where: { name: body.name } });
+        return NextResponse.json({ ok: true });
+      }
+
+      // ---------- accounts (admin) ----------
+      case "createAccount": {
+        if (!admin) return err("Forbidden", 403);
+        if (!body.name) return err("Enter an account name.");
+        const acct = await prisma.account.create({
+          data: { name: body.name, nameTh: body.nameTh || body.name, icon: body.icon || "ph-bank", balance: 0 },
+        });
+        await audit(me, "Created account " + acct.name);
+        return NextResponse.json({ ok: true, id: acct.id });
+      }
+      case "updateAccount": {
+        if (!admin) return err("Forbidden", 403);
+        if (!body.name) return err("Enter an account name.");
+        const acct = await prisma.account.findUnique({ where: { id: body.id } });
+        if (!acct) return err("Not found", 404);
+        await prisma.account.update({
+          where: { id: body.id },
+          data: { name: body.name, nameTh: body.nameTh || body.name, icon: body.icon || "ph-bank" },
+        });
+        return NextResponse.json({ ok: true });
+      }
+      case "closeAccount": {
+        if (!admin) return err("Forbidden", 403);
+        const acct = await prisma.account.findUnique({ where: { id: body.id } });
+        if (!acct) return err("Not found", 404);
+        await prisma.account.update({ where: { id: body.id }, data: { active: false } });
+        await audit(me, "Closed account " + acct.name);
+        return NextResponse.json({ ok: true });
+      }
+      case "addFunds": {
+        if (!admin) return err("Forbidden", 403);
+        const amount = Number(body.amount) || 0;
+        if (amount <= 0) return err("Enter a positive amount.");
+        const acct = await prisma.account.update({
+          where: { id: body.acctId }, data: { balance: { increment: amount } },
+        });
+        await prisma.txn.create({ data: { acctId: acct.id, type: "in", amount, desc: body.desc || "Funds added" } });
+        await audit(me, "Added " + fmt(amount) + " to account " + acct.name);
         return NextResponse.json({ ok: true });
       }
 
