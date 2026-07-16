@@ -61,7 +61,7 @@ export default function App() {
     if (r.error) { showToast("⚠ " + r.error); return false; }
     await refresh();
     if (okMsg) showToast(okMsg);
-    return true;
+    return r;
   }, [refresh, showToast]);
 
   const go = (s, extra = {}) => { setScreen(s); setDetailId(extra.detailId || null); setCatId(extra.catId || null); setNavOpen(false); };
@@ -576,7 +576,12 @@ function Notifs({ data, rpc }) {
 function Settings({ me, data, admin, rpc }) {
   const [email, setEmail] = useState(me.email || "");
   const [notify, setNotify] = useState(!!me.emailNotify);
+  const [lastSync, setLastSync] = useState(null);
   const save = (nextNotify, nextEmail) => rpc("updateSettings", { email: nextEmail ?? email, emailNotify: nextNotify ?? notify }, "Settings saved.");
+  const runBackup = async () => {
+    const r = await rpc("backupToSheets", {}, "Backup synced to Google Sheets.");
+    if (r && r.syncedAt) setLastSync(r.syncedAt);
+  };
   return (<>
     <div className="pagehead"><div><h1 className="h1 dsp">Settings</h1><p className="sub">Personal preferences for your account.</p></div></div>
     <div className="panel" style={{ maxWidth: 560 }}>
@@ -588,6 +593,14 @@ function Settings({ me, data, admin, rpc }) {
       <div className="field"><label className="label">Email address</label><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => save(undefined, email)} placeholder="you@example.com" /></div>
       <div className="dim" style={{ fontSize: 12 }}>Emails are sent only when the server has SMTP configured; in-app notifications always work.</div>
     </div>
+    {admin && (
+      <div className="panel" style={{ maxWidth: 560 }}>
+        <h3 className="panel-t" style={{ marginBottom: 10 }}>Google Sheets backup</h3>
+        <p className="dim" style={{ fontSize: 13, margin: "0 0 14px" }}>Mirrors requests, documents, accounts, transactions and the audit trail into a Google Sheet as a human-readable backup.</p>
+        <button className="btn btn-ghost" onClick={runBackup}><i className="ph ph-cloud-arrow-up" /> Backup now</button>
+        {lastSync && <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>Last synced: {new Date(lastSync).toLocaleString()}</div>}
+      </div>
+    )}
     {admin && data.requests.length === 0 && (
       <div className="panel" style={{ maxWidth: 560 }}>
         <h3 className="panel-t" style={{ marginBottom: 10 }}>Demo data</h3>
