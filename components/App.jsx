@@ -175,6 +175,8 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   const accts = data.accounts;
   const activeAccts = accts.filter((a) => a.active);
   const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
+  const activeAccts = accts.filter((a) => a.active);
+  const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
   const inflow = data.txns.filter((t) => t.type === "in").reduce((s, t) => s + t.amount, 0);
   const outflow = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
   const pending = data.requests.filter((r) => r.status !== "closed");
@@ -208,6 +210,9 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
       </div>
     )}
     <div className="stats">
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
+      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
