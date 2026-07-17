@@ -33,6 +33,11 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SEED_ON_START: ${SEED_ON_START:-false}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      GOOGLE_SHEETS_BACKUP_ID: ${GOOGLE_SHEETS_BACKUP_ID:-}
+      CRON_SECRET: ${CRON_SECRET:-}
     ports:
       # bound to loopback only — nginx on the host is the public entrypoint
       - "127.0.0.1:3000:3000"
