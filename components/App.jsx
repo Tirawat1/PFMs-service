@@ -175,8 +175,7 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   const accts = data.accounts;
   const activeAccts = accts.filter((a) => a.active);
   const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
-  const activeAccts = accts.filter((a) => a.active);
-  const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
+
   const inflow = data.txns.filter((t) => t.type === "in").reduce((s, t) => s + t.amount, 0);
   const outflow = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
   const pending = data.requests.filter((r) => r.status !== "closed");
