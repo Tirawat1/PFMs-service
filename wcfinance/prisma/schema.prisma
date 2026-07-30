@@ -1,0 +1,295 @@
+// WCFinance data model.
+// Mirrors the shapes the browser prototype keeps in local storage, so the
+// migration from prototype -> server is a straight field-for-field import.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- identity
+
+model Role {
+  id          String   @id
+  name        String
+  permissions String[] // "create" | "verify" | "disburse" | "issue_po" | "*"
+  isSystem    Boolean  @default(false)
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  username     String    @unique
+  passwordHash String
+  email        String?
+  emailNotify  Boolean   @default(false)
+  dept         String?
+  active       Boolean   @default(true)
+  roleId       String
+  role         Role      @relation(fields: [roleId], references: [id])
+  createdAt    DateTime  @default(now())
+  lastLoginAt  DateTime?
+
+  requests      Request[]      @relation("requester")
+  projections   Projection[]   @relation("projector")
+  auditEntries  AuditEntry[]
+  notifications Notification[]
+
+  @@index([roleId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------- money
+
+model Account {
+  id      String  @id
+  name    String
+  nameTh  String?
+  icon    String?
+  balance BigInt  @default(0) // satang
+  active  Boolean @default(true)
+
+  txns        Transaction[]
+  requests    Request[]
+  revenues    Revenue[]
+
+  @@map("accounts")
+}
+
+/// A purse inside the project account (advances, sponsorship, registration…)
+model Stream {
+  id      String @id
+  name    String
+  color   String
+  icon    String?
+  balance BigInt @default(0)
+
+  txns     Transaction[]
+  requests Request[]
+  revenues Revenue[]
+
+  @@map("streams")
+}
+
+enum TxnType {
+  in
+  out
+}
+
+model Transaction {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id])
+  streamId  String?
+  stream    Stream?  @relation(fields: [streamId], references: [id])
+  type      TxnType
+  amount    BigInt
+  desc      String
+  refId     String? // request / projection / revenue id
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([accountId, date])
+  @@index([streamId])
+  @@map("transactions")
+}
+
+// ---------------------------------------------------------------- catalog
+
+model Category {
+  id                   String   @id
+  name                 String
+  nameTh               String?
+  icon                 String?
+  notes                String?
+  docsPre              String[]
+  docsPost             String[]
+  docExamples          Json     @default("{}") // { docName: { link, fileName, by, ts } }
+  defaultAcctId        String?
+  defaultPaidVia       String   @default("finance") // finance | purchasing | psat
+  approverRole         String   @default("faculty_finance")
+  vendorRequired       Boolean  @default(false)
+  requireCompletionDocs Boolean @default(true)
+  allowDirect          Boolean  @default(false)
+  active               Boolean  @default(true)
+
+  requests    Request[]
+  projections Projection[]
+
+  @@map("categories")
+}
+
+// ---------------------------------------------------------------- workflow
+
+enum RequestStatus {
+  notified
+  docs_submitted
+  verified
+  disbursed
+  purchase_complete
+  closed
+}
+
+model Request {
+  id            String        @id
+  title         String
+  categoryId    String
+  category      Category      @relation(fields: [categoryId], references: [id])
+  accountId     String?
+  account       Account?      @relation(fields: [accountId], references: [id])
+  streamId      String?
+  stream        Stream?       @relation(fields: [streamId], references: [id])
+  amount        BigInt
+  actualAmount  BigInt?
+  refundAmount  BigInt        @default(0)
+  dept          String
+  requesterId   String
+  requester     User          @relation("requester", fields: [requesterId], references: [id])
+  status        RequestStatus @default(notified)
+
+  paidVia        String  @default("finance")
+  fundRoute      String?
+  vendor         String?
+  vendorRequired Boolean @default(false)
+  vendorExists   Boolean?
+  driveFolder    String?
+  issueReason    String?
+  directClaim    Boolean @default(false)
+
+  /// Receiving bank account supplied by the department
+  bank      Json?
+  /// Proof of payment attached by Project Finance
+  payProof  Json?
+  /// Purchase order (ใบสั่งจ้าง) issued by Faculty Purchasing
+  po        Json?
+
+  eventDate DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  docs         RequestDoc[]
+  projection   Projection?  @relation(fields: [projectionId], references: [id])
+  projectionId String?      @unique
+
+  @@index([status])
+  @@index([dept])
+  @@index([categoryId])
+  @@map("requests")
+}
+
+model RequestDoc {
+  id        String   @id @default(cuid())
+  requestId String
+  request   Request  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  name      String
+  phase     String   @default("pre") // pre | post
+  submitted Boolean  @default(false)
+  link      String?
+  fileName  String?
+  /// Open discrepancy raised by Faculty Finance: { open, note, by, ts, fixed, fixedNote }
+  disc      Json?
+  updatedAt DateTime @updatedAt
+
+  @@index([requestId])
+  @@map("request_docs")
+}
+
+enum ProjectionStatus {
+  submitted
+  approved
+  advanced
+  linked
+  settled
+  rejected
+}
+
+model Projection {
+  id             String           @id
+  title          String
+  categoryId     String
+  category       Category         @relation(fields: [categoryId], references: [id])
+  dept           String
+  requesterId    String
+  requester      User             @relation("projector", fields: [requesterId], references: [id])
+  amount         BigInt
+  expectedDate   DateTime?
+  status         ProjectionStatus @default(submitted)
+  vendorRequired Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  request Request?
+
+  @@index([status])
+  @@index([dept])
+  @@map("projections")
+}
+
+enum RevenueStatus {
+  projected
+  received
+}
+
+model Revenue {
+  id           String        @id
+  title        String
+  source       String
+  accountId    String
+  account      Account       @relation(fields: [accountId], references: [id])
+  streamId     String?
+  stream       Stream?       @relation(fields: [streamId], references: [id])
+  amount       BigInt
+  expectedDate DateTime?
+  status       RevenueStatus @default(projected)
+  createdAt    DateTime      @default(now())
+
+  @@map("revenues")
+}
+
+// ---------------------------------------------------------------- trail
+
+model Notification {
+  id        String   @id @default(cuid())
+  text      String
+  topic     String?
+  sender    String?
+  senderRole String?
+  dept      String?
+  refId     String?
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+model AuditEntry {
+  id        String   @id @default(cuid())
+  text      String
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  actorName String?
+  actorRole String?
+  refId     String?
+  createdAt DateTime @default(now())
+
+  @@index([refId])
+  @@index([createdAt])
+  @@map("audit_entries")
+}
+
+model Setting {
+  key   String @id
+  value Json
+
+  @@map("settings")
+}
