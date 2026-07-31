@@ -7,6 +7,10 @@ import { ORDER, STATUS, ADV_PERM, ADV_LABELS } from "@/lib/constants";
 import { seedDemo, ROLES } from "@/lib/seed-data.mjs";
 import { canManageRequestDocs } from "@/lib/permissions.mjs";
 import { advanceRequestTx, resolveDisburseAccount } from "@/lib/requests.mjs";
+import { approveProjectionTx, settleProjectionTx } from "@/lib/projections.mjs";
+import { resolveRequestSource } from "@/lib/direct-claim.mjs";
+import { addVendorDocs } from "@/lib/vendor-docs.mjs";
+import { editTxnTx } from "@/lib/txn-edit.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -49,10 +53,16 @@ export async function POST(req) {
       // ---------- requests ----------
       case "createRequest": {
         if (!can(me, "create")) return err("Forbidden", 403);
-        const { title, categoryId, amount, desc, eventDate } = body;
+        const { title, categoryId, amount, desc, eventDate, projectionId } = body;
         if (!title || !categoryId) return err("Fill title and category.");
         const cat = await prisma.category.findUnique({ where: { id: categoryId } });
         if (!cat || !cat.active) return err("Unknown category.");
+        let proj = null;
+        if (projectionId) proj = await prisma.projection.findUnique({ where: { id: projectionId } });
+        const source = resolveRequestSource({
+          projectionId, projectionStatus: proj?.status || null, categoryAllowDirect: cat.allowDirect,
+        });
+        if (source.error) return err(source.error);
         const parsedEventDate = eventDate ? new Date(eventDate) : new Date();
         const counter = await prisma.counter.update({
           where: { id: "request" },
@@ -67,11 +77,84 @@ export async function POST(req) {
             eventDate: isNaN(parsedEventDate) ? new Date() : parsedEventDate,
             docs: cat.docs.map((name) => ({ name, submitted: false, link: null, fileName: null, disc: null })),
             driveFolder: "https://drive.google.com/drive/folders/PFMS-" + id,
+            projectionId: projectionId || null,
+            directClaim: source.directClaim,
           },
         });
-        await audit(me, "Submitted reimbursement " + id);
+        if (proj) {
+          await prisma.projection.update({ where: { id: proj.id }, data: { status: "linked", requestId: id } });
+        }
+        await audit(me, "Submitted reimbursement " + id + (proj ? " against projection " + proj.id : ""));
         await notifyPerm("verify", "New reimbursement " + id + " (" + title + ") notified to Project Finance.", "notified", me.id);
         return NextResponse.json({ ok: true, id });
+      }
+      case "createProjection": {
+        if (!can(me, "create")) return err("Forbidden", 403);
+        const { title, categoryId, amount, expectedDate } = body;
+        const parsedAmount = Number(amount);
+        if (!title || !categoryId) return err("Fill item and category.");
+        if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return err("Enter a positive amount.");
+        const cat = await prisma.category.findUnique({ where: { id: categoryId } });
+        if (!cat || !cat.active) return err("Unknown category.");
+        const counter = await prisma.counter.update({
+          where: { id: "projection" },
+          data: { value: { increment: 1 } },
+        });
+        const id = "PJ-" + counter.value;
+        await prisma.projection.create({
+          data: {
+            id, title, categoryId, amount: parsedAmount,
+            dept: me.dept, requesterId: me.id, requesterName: me.name,
+            expectedDate: expectedDate ? new Date(expectedDate) : new Date(),
+          },
+        });
+        await audit(me, "Submitted projection " + id + " (" + fmt(parsedAmount) + ") for " + me.dept);
+        await notifyPerm("create", "New projected expense " + id + " submitted by " + me.dept + " (" + fmt(parsedAmount) + ").", "notified", me.id);
+        return NextResponse.json({ ok: true, id });
+      }
+      case "approveProjection": {
+        if (!can(me, "verify") && !admin) return err("Forbidden", 403);
+        const proj = await prisma.projection.findUnique({ where: { id: body.id } });
+        if (!proj) return err("Not found", 404);
+        if (proj.status !== "submitted") return err("This projection cannot be approved.");
+        const faculty = await prisma.account.findUnique({ where: { id: "faculty" } });
+        const project = await prisma.account.findUnique({ where: { id: "project" } });
+        if (!faculty || !project || !faculty.active || !project.active) return err("Faculty or Project account is unavailable.");
+        if (faculty.balance < proj.amount) return err("Insufficient balance in Faculty account for this advance.");
+        const result = await approveProjectionTx(prisma, {
+          id: proj.id, currentStatus: "submitted", amount: proj.amount,
+          facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
+        });
+        if (result.conflict) return err("This projection was already advanced.");
+        await audit(me, "Issued advance for projection " + proj.id + " (" + fmt(proj.amount) + ")");
+        await notifyPerm("create", proj.id + " advance issued — " + fmt(proj.amount) + " transferred Faculty → Project.", "disbursed", me.id);
+        return NextResponse.json({ ok: true });
+      }
+      case "toggleCategoryDirect": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        await prisma.category.update({ where: { id: c.id }, data: { allowDirect: !c.allowDirect } });
+        await audit(me, (c.allowDirect ? "Disabled" : "Enabled") + " direct reimbursement for category " + c.name);
+        return NextResponse.json({ ok: true, allowDirect: !c.allowDirect });
+      }
+      // Requester (or admin) answers whether the supplier is an already-registered vendor
+      case "reportVendor": {
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        if (!canManageRequestDocs(me, r, admin)) return err("Forbidden", 403);
+        const exists = body.exists === true;
+        let docs = r.docs;
+        if (!exists) {
+          const vendorDocs = await prisma.masterDoc.findMany({ where: { vendorDoc: true } });
+          docs = addVendorDocs(r.docs, vendorDocs.map((d) => d.name));
+        }
+        await prisma.request.update({ where: { id: r.id }, data: { vendorExists: exists, vendor: (body.vendor ?? r.vendor), docs } });
+        await audit(me, exists ? "Confirmed existing vendor for " + r.id : "Reported new vendor for " + r.id + " — added vendor-registration documents");
+        if (!exists) {
+          await notifyPerm("verify", r.id + " — supplier is not a registered vendor; vendor-registration documents added to the checklist.", "notified", me.id);
+        }
+        return NextResponse.json({ ok: true });
       }
 
       case "advanceRequest": {
@@ -102,6 +185,18 @@ export async function POST(req) {
           acctId, proofLink,
         });
         if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
+        if (next === "disbursed" && r.projectionId) {
+          const proj = await prisma.projection.findUnique({ where: { id: r.projectionId } });
+          if (proj && proj.status === "linked") {
+            const settle = await settleProjectionTx(prisma, {
+              id: proj.id, currentStatus: "linked", advancedAmount: proj.amount, actualAmount: r.amount,
+              facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
+            });
+            if (!settle.conflict && settle.refund > 0) {
+              await audit(me, "Returned unspent advance " + fmt(settle.refund) + " for " + r.id + " to Faculty account");
+            }
+          }
+        }
         const label = STATUS[next].label + (next === "disbursed" ? " (" + fmt(r.amount) + " transferred)" : "");
         await audit(me, "Advanced " + r.id + " to " + STATUS[next].label + (next === "disbursed" ? " from account " + acctName : ""));
         await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — " + label + ".", next);
@@ -242,6 +337,14 @@ export async function POST(req) {
         await prisma.masterDoc.deleteMany({ where: { name: body.name } });
         return NextResponse.json({ ok: true });
       }
+      case "toggleMasterDocVendor": {
+        if (!admin) return err("Forbidden", 403);
+        const doc = await prisma.masterDoc.findUnique({ where: { id: body.id } });
+        if (!doc) return err("Not found", 404);
+        await prisma.masterDoc.update({ where: { id: doc.id }, data: { vendorDoc: !doc.vendorDoc } });
+        await audit(me, (doc.vendorDoc ? "Removed" : "Added") + ' vendor-registration document "' + doc.name + '"');
+        return NextResponse.json({ ok: true, vendorDoc: !doc.vendorDoc });
+      }
 
       // ---------- accounts (admin) ----------
       case "createAccount": {
@@ -282,6 +385,21 @@ export async function POST(req) {
         await prisma.txn.create({ data: { acctId: acct.id, type: "in", amount, desc: body.desc || "Funds added" } });
         await audit(me, "Added " + fmt(amount) + " to account " + acct.name);
         return NextResponse.json({ ok: true });
+      }
+      case "editTransaction": {
+        if (!admin) return err("Forbidden", 403);
+        const newAmount = Number(body.amount);
+        const reason = (body.reason || "").trim();
+        if (!Number.isFinite(newAmount) || newAmount < 0) return err("Enter a valid amount (zero or more).");
+        if (reason.length < 3) return err("A reason is required for every figure change.");
+        const txn = await prisma.txn.findUnique({ where: { id: body.id } });
+        if (!txn) return err("Not found", 404);
+        if (newAmount === txn.amount) return err("The amount is unchanged.");
+        const { delta } = await editTxnTx(prisma, {
+          id: txn.id, acctId: txn.acctId, type: txn.type, oldAmount: txn.amount, newAmount,
+        });
+        await audit(me, "Correction — transaction \"" + txn.desc + "\" changed from " + fmt(txn.amount) + " to " + fmt(newAmount) + ". Reason: " + reason);
+        return NextResponse.json({ ok: true, delta });
       }
 
       // ---------- users & roles (admin) ----------
@@ -325,6 +443,14 @@ export async function POST(req) {
         await prisma.role.delete({ where: { id: body.id } });
         await audit(me, "Removed role " + (r?.name || body.id));
         return NextResponse.json({ ok: true });
+      }
+      case "toggleRoleAdvDash": {
+        if (!admin) return err("Forbidden", 403);
+        const role = await prisma.role.findUnique({ where: { id: body.id } });
+        if (!role) return err("Not found", 404);
+        await prisma.role.update({ where: { id: role.id }, data: { canSeeAdvances: !role.canSeeAdvances } });
+        await audit(me, (role.canSeeAdvances ? "Revoked" : "Granted") + " Projected Expenses dashboard visibility for role " + role.name);
+        return NextResponse.json({ ok: true, canSeeAdvances: !role.canSeeAdvances });
       }
 
       // ---------- misc ----------

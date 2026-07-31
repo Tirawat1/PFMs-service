@@ -14,6 +14,7 @@ model Role {
   perms   Json // array of permission keys, or ["*"] for admin
   contact String  @default("")
   system  Boolean @default(false)
+  canSeeAdvances Boolean @default(false)
   users   User[]
 }
 
@@ -39,11 +40,13 @@ model Category {
   notes         String  @default("")
   defaultAcctId String?
   active        Boolean @default(true) // soft-close, never hard-delete — existing requests still reference categoryId
+  allowDirect   Boolean @default(false) // may be reimbursed without a projected-expense advance
 }
 
 model MasterDoc {
-  id   String @id @default(cuid())
-  name String @unique
+  id        String  @id @default(cuid())
+  name      String  @unique
+  vendorDoc Boolean @default(false)
 }
 
 model Account {
@@ -81,7 +84,10 @@ model Request {
   eventDate         DateTime @default(now())
   acctId            String?
   projectionId      String?
+  directClaim       Boolean  @default(false)
   disburseProofLink String   @default("")
+  vendor            String   @default("")
+  vendorExists      Boolean?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

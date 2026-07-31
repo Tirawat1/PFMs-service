@@ -11,6 +11,7 @@ const AV = ["linear-gradient(135deg,#f0378a,#b71e60)", "linear-gradient(135deg,#
 const NAV = [
   { key: "dashboard", label: "Dashboard", icon: "ph-squares-four", perm: "dashboard" },
   { key: "requests", label: "Reimbursements", icon: "ph-receipt", perm: "requests" },
+  { key: "projections", label: "Projected Expenses", icon: "ph-chart-line-up", perm: "requests" },
   { key: "categories", label: "Expense Categories", icon: "ph-tag", perm: "dashboard" },
   { key: "accounts", label: "Accounts", icon: "ph-bank", perm: "accounts" },
   { key: "notifs", label: "Notifications", icon: "ph-bell", perm: "notifications" },
@@ -73,8 +74,10 @@ export default function App() {
   if (!data) return <div className="app" style={{ display: "grid", placeItems: "center", minHeight: "100vh", color: "var(--dim)" }}>Loading…</div>;
 
   const unread = data.notifs.filter((n) => !n.read).length;
-  const navItems = NAV.filter((n) => (n.perm === "*" ? admin : can(n.perm)));
-  const titleMap = { dashboard: "Dashboard", requests: "Reimbursements", detail: "Request detail", categories: "Expense Categories", catedit: "Edit category", accounts: "Accounts", users: "Users & Roles", docmenu: "Document Menu", audit: "Audit Trail", notifs: "Notifications", settings: "Settings" };
+  const navItems = NAV.filter((n) => n.key === "projections"
+    ? (admin || can(n.perm) || me.role?.canSeeAdvances)
+    : (n.perm === "*" ? admin : can(n.perm)));
+  const titleMap = { dashboard: "Dashboard", requests: "Reimbursements", detail: "Request detail", projections: "Projected Expenses", categories: "Expense Categories", catedit: "Edit category", accounts: "Accounts", users: "Users & Roles", docmenu: "Document Menu", audit: "Audit Trail", notifs: "Notifications", settings: "Settings" };
 
   const ctx = { me, data, admin, can, lang, catName, catAlt, go, rpc, setModal, setForm, showToast, reqFilter, setReqFilter, detailId, catId, refresh };
 
@@ -119,6 +122,7 @@ export default function App() {
           <div className="content">
             {screen === "dashboard" && <Dashboard {...ctx} />}
             {screen === "requests" && <Requests {...ctx} />}
+            {screen === "projections" && <Projections {...ctx} />}
             {screen === "detail" && <Detail {...ctx} />}
             {screen === "categories" && <Categories {...ctx} />}
             {screen === "catedit" && <CatEdit {...ctx} />}
@@ -245,7 +249,7 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   </>);
 }
 
-function TxnRow({ t, accounts }) {
+function TxnRow({ t, accounts, onEdit }) {
   const acc = accounts.find((a) => a.id === t.acctId);
   const isIn = t.type === "in";
   return (
@@ -253,6 +257,7 @@ function TxnRow({ t, accounts }) {
       <div className="acct-ic" style={{ width: 34, height: 34, fontSize: 15, background: isIn ? "rgba(15,157,107,.14)" : "rgba(225,29,72,.12)", color: isIn ? "var(--green)" : "#e11d48" }}><i className={"ph " + (isIn ? "ph-arrow-down-left" : "ph-arrow-up-right")} /></div>
       <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc}</div><div className="dim" style={{ fontSize: 11 }}>{acc ? acc.name : t.acctId} · {fmtDate(t.date)}</div></div>
       <div className={"mono " + (isIn ? "pos" : "neg")} style={{ fontWeight: 800, fontSize: 13.5 }}>{(isIn ? "+" : "−") + fmt(t.amount)}</div>
+      {onEdit && <i className="ph ph-pencil-simple numedit" onClick={() => onEdit(t)} />}
     </div>
   );
 }
@@ -290,9 +295,42 @@ function Requests({ data, can, lang, catName, catAlt, go, setModal, setForm, req
   </>);
 }
 
+/* ---------- Projections ---------- */
+const PJ_LABEL = { submitted: "Submitted", advanced: "Advance issued", linked: "Linked to request", settled: "Settled" };
+function Projections({ data, me, admin, can, catName, setModal, setForm, rpc }) {
+  const list = data.projections || [];
+  const canVerify = admin || can("verify");
+  return (<>
+    <div className="pagehead">
+      <div><h1 className="h1 dsp">Projected <span className="gradt">Expenses</span></h1><p className="sub">Submit an expected cost before spending, and get an advance from Faculty to Project once approved.</p></div>
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", expectedDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newProjection" }); }}><i className="ph ph-plus" /> Submit projection</button>}
+    </div>
+    <div className="panel" style={{ padding: "8px 8px 4px" }}>
+      {list.length === 0 ? <div className="empty"><i className="ph ph-chart-line-up" />No projected expenses yet.</div> : (
+        <div className="tblwrap"><table className="tbl"><thead><tr><th>Title</th><th>Department</th><th>Amount</th><th>Expected date</th><th>Status</th><th /></tr></thead><tbody>
+          {list.map((p) => {
+            const c = data.categories.find((x) => x.id === p.categoryId);
+            return (
+              <tr key={p.id} className="trow">
+                <td><div className="tt">{p.title}</div><div className="tsub">{p.id} · {c ? catName(c) : "—"}</div></td>
+                <td className="muted">{p.dept}</td>
+                <td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}</td>
+                <td className="muted">{fmtDate(p.expectedDate)}</td>
+                <td><span className="badge st-notified">{PJ_LABEL[p.status] || p.status}</span></td>
+                <td>{p.status === "submitted" && canVerify && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("approveProjection", { id: p.id }, "Advance issued.")}><i className="ph ph-check" /> Issue advance</button>}</td>
+              </tr>
+            );
+          })}
+        </tbody></table></div>
+      )}
+    </div>
+  </>);
+}
+
 /* ---------- Detail ---------- */
 function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal, setForm, detailId }) {
   const r = data.requests.find((x) => x.id === detailId);
+  const [vendor, setVendor] = useState(r ? r.vendor : "");
   if (!r) return <div className="empty"><i className="ph ph-tray" />Request not found.</div>;
   const c = data.categories.find((x) => x.id === r.categoryId);
   const st = STATUS[r.status];
@@ -308,6 +346,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
     <div className="fx ac gap12" style={{ flexWrap: "wrap" }}>
       <button className="iconbtn" onClick={() => go("requests")}><i className="ph ph-arrow-left" /></button>
       <div><h1 className="h1 dsp" style={{ fontSize: 27 }}>{r.title}</h1><div className="dim" style={{ fontSize: 13, marginTop: 4 }}>{r.id} · event {fmtDate(r.eventDate)} · created {fmtDate(r.createdAt)}</div></div>
+      {r.directClaim && <span className="mig-tag"><i className="ph ph-lightning" /> Direct claim</span>}
       <span className={"badge st-" + r.status} style={{ marginLeft: "auto", fontSize: 13, padding: "8px 15px" }}>{lang === "th" ? st.th : st.label}</span>
     </div>
     <div className="panel"><div className="steps">{ORDER.map((k, i) => <div key={k} className={"step" + (i < ci ? " done" : i === ci ? " cur" : "")}><div className="step-d"><i className={"ph " + STATUS[k].icon} /></div><div className="step-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div></div>
@@ -360,6 +399,19 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         </div>
         <div><div className="label" style={{ marginBottom: 5 }}>Description</div><div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{r.desc || "Reimbursement request submitted by " + r.requesterName + "."}</div></div>
         {c && c.notes && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--soft)", border: "1px solid rgba(240,55,138,.2)" }}><div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent2)", marginBottom: 5 }}><i className="ph ph-info" /> Category note</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{c.notes}</div></div>}
+        {(isRequester || admin) && r.vendorExists == null && (
+          <div className="issue-box">
+            <div className="issue-title">Is the supplier an already-registered vendor?</div>
+            <div className="field" style={{ marginBottom: 10 }}><input className="input" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Supplier / vendor name" /></div>
+            <div className="fx gap8" style={{ flexWrap: "wrap" }}>
+              <button className="btn btn-primary grad btn-sm" onClick={() => rpc("reportVendor", { id: r.id, exists: true, vendor }, "Vendor confirmed.")}><i className="ph ph-check" /> Yes, existing vendor</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => rpc("reportVendor", { id: r.id, exists: false, vendor }, "Vendor-registration documents added.")}><i className="ph ph-plus" /> No — register new vendor</button>
+            </div>
+          </div>
+        )}
+        {r.vendorExists != null && (
+          <div className="dim" style={{ fontSize: 12.5 }}><i className="ph ph-storefront" /> {r.vendorExists ? "Existing registered vendor" : "New vendor — registration documents added to the checklist"}</div>
+        )}
         {r.acctId && (
           <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
             <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-bank" /> Disbursed from</div>
@@ -417,6 +469,10 @@ function CatEdit({ data, go, rpc, catId }) {
             <option value="">No default — officer picks at disbursement</option>
             {data.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
+        </div>
+        <div className="fx ac jb" style={{ marginTop: 16 }}>
+          <div><div style={{ fontWeight: 700, fontSize: 14 }}>Allow direct reimbursement</div><div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>Departments may submit this category without a projected expense.</div></div>
+          <div className={"switch" + (c.allowDirect ? " on" : "")} onClick={() => rpc("toggleCategoryDirect", { id: c.id })} />
         </div>
       </div>
       <div className="panel">
@@ -477,13 +533,13 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
           );
         })}
       </div>
-      <div className="panel"><h3 className="panel-t" style={{ marginBottom: 14 }}>Transactions</h3><div style={{ display: "flex", flexDirection: "column" }}>{data.txns.map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} />)}</div></div>
+      <div className="panel"><h3 className="panel-t" style={{ marginBottom: 14 }}>Transactions</h3><div style={{ display: "flex", flexDirection: "column" }}>{data.txns.map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} onEdit={admin ? (txn) => { setForm({ amount: txn.amount, reason: "" }); setModal({ type: "editTxn", txnId: txn.id, txnDesc: txn.desc, oldAmount: txn.amount }); } : null} />)}</div></div>
     </div>
   </>);
 }
 
 /* ---------- Users & Roles ---------- */
-function Users({ me, data, rpc, setModal, setForm }) {
+function Users({ me, admin, data, rpc, setModal, setForm }) {
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Users &amp; <span className="gradt">Roles</span></h1><p className="sub">Configure access permissions, add or remove roles, and assign a designated contact person to each role.</p></div>
@@ -509,6 +565,7 @@ function Users({ me, data, rpc, setModal, setForm }) {
           <div className="fx ac jb"><div style={{ fontWeight: 800, fontSize: 15 }}>{r.name}</div>{!r.system && <i className="ph ph-trash dim rowlink" onClick={() => rpc("deleteRole", { id: r.id }, "Role removed.")} />}</div>
           <div className="dim th" style={{ fontSize: 12.5 }}>{r.nameTh}</div>
           <div className="chipwrap">{((r.perms || []).includes("*") ? ["full access"] : r.perms).map((p) => <span key={p} className="doc-chip" style={{ padding: "4px 9px", fontSize: 11.5 }}>{p}</span>)}</div>
+          <span className="mig-chip pointer" style={admin ? {} : { opacity: 0.6, cursor: "default" }} onClick={() => admin && rpc("toggleRoleAdvDash", { id: r.id })}><i className={r.canSeeAdvances ? "ph-fill ph-chart-line-up" : "ph ph-chart-line-up"} /> Sees Projected Expenses: {r.canSeeAdvances ? "on" : "off"}</span>
           <div className="dim" style={{ fontSize: 12, borderTop: "1px solid var(--line)", paddingTop: 9 }}><i className="ph ph-user-circle" /> Contact: <span style={{ color: "var(--txt)", fontWeight: 600 }}>{r.contact || "—"}</span></div>
         </div>
       ))}
@@ -526,7 +583,13 @@ function DocMenu({ data, rpc }) {
         <input className="input" style={{ flex: 1, minWidth: 200 }} placeholder="Add a document to the master menu…" value={draft} onChange={(e) => setDraft(e.target.value)} />
         <button className="btn btn-primary grad" onClick={async () => { if (await rpc("addMasterDoc", { name: draft }, "Added to document menu.")) setDraft(""); }}><i className="ph ph-plus" /> Add</button>
       </div>
-      <div className="chipwrap">{data.masterDocs.map((m) => <div key={m.id} className="doc-chip" style={{ padding: "9px 13px" }}><span className="th">{m.name}</span><i className="ph ph-x" onClick={() => rpc("removeMasterDoc", { name: m.name })} /></div>)}</div>
+      <div className="chipwrap">{data.masterDocs.map((m) => (
+        <div key={m.id} className={"doc-chip" + (m.vendorDoc ? " has-ex" : "")} style={{ padding: "9px 13px" }}>
+          <span className="th">{m.name}</span>
+          <span className="chip-act" title="Vendor doc" onClick={() => rpc("toggleMasterDocVendor", { id: m.id })}><i className={m.vendorDoc ? "ph-fill ph-storefront" : "ph ph-storefront"} /></span>
+          <i className="ph ph-x" onClick={() => rpc("removeMasterDoc", { name: m.name })} />
+        </div>
+      ))}</div>
     </div>
   </>);
 }
@@ -619,12 +682,13 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds" };
+  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
     let ok = false;
     if (modal.type === "newRequest") ok = await rpc("createRequest", form, "Reimbursement submitted.");
+    else if (modal.type === "newProjection") ok = await rpc("createProjection", form, "Projection submitted.");
     else if (modal.type === "newUser") ok = await rpc("createUser", form, "User added.");
     else if (modal.type === "newRole") ok = await rpc("createRole", form, "Role created.");
     else if (modal.type === "newCategory") ok = await rpc("createCategory", form, "Category created.");
@@ -634,6 +698,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "disburse") ok = await rpc("advanceRequest", { id: modal.reqId, acctId: form.acctId, proofLink: form.proofLink }, "Funds disbursed.");
     else if (modal.type === "newAccount") ok = await rpc("createAccount", form, "Account created.");
     else if (modal.type === "addFunds") ok = await rpc("addFunds", { acctId: modal.acctId, amount: form.amount, desc: form.desc }, "Funds added.");
+    else if (modal.type === "editTxn") ok = await rpc("editTransaction", { id: modal.txnId, amount: form.amount, reason: form.reason }, "Transaction corrected.");
     if (ok) close();
   };
 
@@ -645,10 +710,30 @@ function Modal({ ctx, modal, form, setForm, close }) {
         {modal.type === "newRequest" && (<>
           <div className="field"><label className="label">Title</label><input className="input" value={form.title || ""} onChange={set("title")} placeholder="e.g. Snacks for opening ceremony" /></div>
           <div className="field"><label className="label">Expense category</label><select className="input" value={form.categoryId || ""} onChange={set("categoryId")}>{data.categories.filter((c) => c.active !== false).map((c) => <option key={c.id} value={c.id}>{catName(c)}</option>)}</select></div>
+          {(data.projections || []).some((p) => p.status === "advanced") && (
+            <div className="field"><label className="label">Against a projected expense (optional)</label><select className="input" value={form.projectionId || ""} onChange={set("projectionId")}>
+              <option value="">None — direct claim</option>
+              {data.projections.filter((p) => p.status === "advanced").map((p) => <option key={p.id} value={p.id}>{p.id} — {p.title} ({fmt(p.amount)})</option>)}
+            </select></div>
+          )}
           <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
           <div className="field"><label className="label">Event date (when the expense actually happened)</label><input className="input" type="date" value={form.eventDate || ""} onChange={set("eventDate")} /></div>
           <div className="field"><label className="label">Description</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.desc || ""} onChange={set("desc")} placeholder="Purpose of this expense…" /></div>
           {selCat && selCat.docs.length > 0 && <div className="field"><label className="label">Documents required for this category</label><div className="chipwrap">{selCat.docs.map((d) => <span key={d} className="doc-chip th" style={{ padding: "5px 10px", fontSize: 12 }}>{d}</span>)}</div></div>}
+        </>)}
+
+        {modal.type === "newProjection" && (<>
+          <div className="field"><label className="label">Item title</label><input className="input" value={form.title || ""} onChange={set("title")} placeholder="e.g. Venue rental" /></div>
+          <div className="field"><label className="label">Expense category</label><select className="input" value={form.categoryId || ""} onChange={set("categoryId")}>{data.categories.filter((c) => c.active !== false).map((c) => <option key={c.id} value={c.id}>{catName(c)}</option>)}</select></div>
+          <div className="field"><label className="label">Projected amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
+          <div className="field"><label className="label">Expected date</label><input className="input" type="date" value={form.expectedDate || ""} onChange={set("expectedDate")} /></div>
+        </>)}
+
+        {modal.type === "editTxn" && (<>
+          <div className="field"><label className="label">Description</label><div className="muted" style={{ fontSize: 14 }}>{modal.txnDesc}</div></div>
+          <div className="field"><label className="label">Current amount</label><div className="mono" style={{ fontWeight: 800, fontSize: 18 }}>{fmt(modal.oldAmount)}</div></div>
+          <div className="field"><label className="label">Corrected amount (THB)</label><input className="input mono" type="number" value={form.amount ?? ""} onChange={set("amount")} placeholder="0" /></div>
+          <div className="field"><label className="label">Reason for correction</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="e.g. Extra zero entered by mistake" /></div>
         </>)}
 
         {modal.type === "newUser" && (<>

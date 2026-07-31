@@ -9,7 +9,7 @@ export async function GET() {
   if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const admin = can(me, "*") || (me.role.perms || []).includes("*");
 
-  const [roles, users, categories, masterDocs, accounts, txns, requests, notifs, audit] =
+  const [roles, users, categories, masterDocs, accounts, txns, requests, projections, notifs, audit] =
     await Promise.all([
       prisma.role.findMany(),
       prisma.user.findMany({ include: { role: true } }),
@@ -18,13 +18,14 @@ export async function GET() {
       prisma.account.findMany(),
       prisma.txn.findMany({ orderBy: { date: "desc" }, take: 200 }),
       prisma.request.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.projection.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.notification.findMany({ where: { userId: me.id }, orderBy: { ts: "desc" }, take: 100 }),
       admin ? prisma.audit.findMany({ orderBy: { ts: "desc" }, take: 300 }) : Promise.resolve([]),
     ]);
 
   const shaped = shapeSnapshot(
-    { admin, canAccounts: can(me, "accounts"), canDisburse: can(me, "disburse"), canRequests: can(me, "requests") },
-    { roles, users: users.map(sanitizeUser), categories, masterDocs, accounts, txns, requests, notifs, audit }
+    { admin, canAccounts: can(me, "accounts"), canDisburse: can(me, "disburse"), canRequests: can(me, "requests"), canSeeAdvances: !!me.role.canSeeAdvances },
+    { roles, users: users.map(sanitizeUser), categories, masterDocs, accounts, txns, requests, projections, notifs, audit }
   );
 
   return NextResponse.json({ me: sanitizeUser(me), ...shaped });
