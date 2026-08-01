@@ -17,6 +17,8 @@ import { canApproveCategory } from "@/lib/payment-routing.mjs";
 import { validateVendorAtSubmission } from "@/lib/vendor-required.mjs";
 import { payDepositTx, remainingAfterDeposit } from "@/lib/deposit.mjs";
 import { canReturnForCorrection } from "@/lib/return-correction.mjs";
+import { editAmountTx, deleteTxnTx } from "@/lib/corrections.mjs";
+import { applyStatusOverride } from "@/lib/status-override.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -564,10 +566,49 @@ export async function POST(req) {
         if (!txn) return err("Not found", 404);
         if (newAmount === txn.amount) return err("The amount is unchanged.");
         const { delta } = await editTxnTx(prisma, {
-          id: txn.id, acctId: txn.acctId, type: txn.type, oldAmount: txn.amount, newAmount,
+          id: txn.id, acctId: txn.acctId, streamId: txn.streamId, type: txn.type, oldAmount: txn.amount, newAmount,
         });
         await audit(me, "Correction — transaction \"" + txn.desc + "\" changed from " + fmt(txn.amount) + " to " + fmt(newAmount) + ". Reason: " + reason);
         return NextResponse.json({ ok: true, delta });
+      }
+      case "editRecordAmount": {
+        if (!admin) return err("Forbidden", 403);
+        const { kind, id, field, reason } = body;
+        const newValue = Number(body.newValue);
+        if (!["account", "stream", "request", "projection", "revenue"].includes(kind)) return err("Unknown record kind.");
+        if (!Number.isFinite(newValue) || newValue < 0) return err("Enter a valid amount (zero or more).");
+        if ((reason || "").trim().length < 3) return err("A reason is required for every figure change.");
+        const finders = { account: prisma.account, stream: prisma.stream, request: prisma.request, projection: prisma.projection, revenue: prisma.revenue };
+        const record = await finders[kind].findUnique({ where: { id } });
+        if (!record) return err("Not found", 404);
+        const oldValue = record[field];
+        if (newValue === oldValue) return err("The amount is unchanged.");
+        await editAmountTx(prisma, { kind, id, field, newValue });
+        await audit(me, "Correction — " + kind + " " + id + " " + field + " changed from " + fmt(oldValue) + " to " + fmt(newValue) + ". Reason: " + reason.trim());
+        return NextResponse.json({ ok: true });
+      }
+      case "deleteTransaction": {
+        if (!admin) return err("Forbidden", 403);
+        const reason = (body.reason || "").trim();
+        if (reason.length < 3) return err("A reason is required to delete a transaction.");
+        const txn = await prisma.txn.findUnique({ where: { id: body.id } });
+        if (!txn) return err("Not found", 404);
+        await deleteTxnTx(prisma, { id: txn.id });
+        await audit(me, 'Deleted transaction "' + txn.desc + '" (' + fmt(txn.amount) + "). Balance reversed. Reason: " + reason);
+        return NextResponse.json({ ok: true });
+      }
+      case "setRecordStatus": {
+        const check = applyStatusOverride({ isMigrationOperator: !!me.role.isMigrationOperator, chosenStatus: body.status });
+        if (check.error) return err(check.error);
+        const { kind, id } = body;
+        const finders = { request: prisma.request, projection: prisma.projection, revenue: prisma.revenue };
+        if (!finders[kind]) return err("Unknown record kind.");
+        const record = await finders[kind].findUnique({ where: { id } });
+        if (!record) return err("Not found", 404);
+        const from = record.status;
+        await finders[kind].update({ where: { id }, data: { status: body.status, migrated: true } });
+        await audit(me, "Set status of " + kind + " " + id + ' from "' + from + '" to "' + body.status + '"');
+        return NextResponse.json({ ok: true });
       }
 
       // ---------- users & roles (admin) ----------

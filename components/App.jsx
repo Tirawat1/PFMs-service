@@ -252,7 +252,7 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   </>);
 }
 
-function TxnRow({ t, accounts, onEdit }) {
+function TxnRow({ t, accounts, onEdit, onDelete }) {
   const acc = accounts.find((a) => a.id === t.acctId);
   const isIn = t.type === "in";
   return (
@@ -261,6 +261,7 @@ function TxnRow({ t, accounts, onEdit }) {
       <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc}</div><div className="dim" style={{ fontSize: 11 }}>{acc ? acc.name : t.acctId} · {fmtDate(t.date)}</div></div>
       <div className={"mono " + (isIn ? "pos" : "neg")} style={{ fontWeight: 800, fontSize: 13.5 }}>{(isIn ? "+" : "−") + fmt(t.amount)}</div>
       {onEdit && <i className="ph ph-pencil-simple numedit" onClick={() => onEdit(t)} />}
+      {onDelete && <i className="ph ph-trash numedit" onClick={() => onDelete(t)} />}
     </div>
   );
 }
@@ -317,10 +318,15 @@ function Projections({ data, me, admin, can, catName, setModal, setForm, rpc }) 
               <tr key={p.id} className="trow">
                 <td><div className="tt">{p.title}</div><div className="tsub">{p.id} · {c ? catName(c) : "—"}</div></td>
                 <td className="muted">{p.dept}</td>
-                <td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}</td>
+                <td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: p.amount, reason: "" }); setModal({ type: "editNumber", kind: "projection", id: p.id, field: "amount", label: "Amount — " + p.id, orig: p.amount }); }} />}</td>
                 <td className="muted">{fmtDate(p.expectedDate)}</td>
                 <td><span className="badge st-notified">{PJ_LABEL[p.status] || p.status}</span></td>
-                <td>{p.status === "submitted" && canVerify && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("approveProjection", { id: p.id }, "Advance issued.")}><i className="ph ph-check" /> Issue advance</button>}</td>
+                <td>
+                  {p.status === "submitted" && canVerify && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("approveProjection", { id: p.id }, "Advance issued.")}><i className="ph ph-check" /> Issue advance</button>}
+                  {me.role.isMigrationOperator && <select className="input" style={{ marginTop: 6 }} value={p.status} onChange={(e) => rpc("setRecordStatus", { kind: "projection", id: p.id, status: e.target.value }, "Status updated.")}>
+                    {["submitted", "advanced", "linked", "settled"].map((s) => <option key={s} value={s}>{PJ_LABEL[s]}</option>)}
+                  </select>}
+                </td>
               </tr>
             );
           })}
@@ -355,6 +361,17 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
     <div className="panel"><div className="steps">{ORDER.map((k, i) => <div key={k} className={"step" + (i < ci ? " done" : i === ci ? " cur" : "")}><div className="step-d"><i className={"ph " + STATUS[k].icon} /></div><div className="step-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div></div>
     {openDisc > 0 && <div className="attn" style={{ marginBottom: 0 }}><i className="ph-fill ph-warning" style={{ color: "var(--amber)" }} /><span>{openDisc} document{openDisc > 1 ? "s" : ""} flagged with a discrepancy — revision needed.</span></div>}
     {r.issueReason && <div className="issue-box" style={{ marginBottom: 0 }}><div className="issue-title"><i className="ph ph-warning-circle" /> Returned for correction</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{r.issueReason}</div></div>}
+    {me.role.isMigrationOperator && (
+      <div className="mig-banner">
+        <i className="ph ph-database" />
+        <div style={{ flex: 1 }}>
+          <div>Data-migration override{r.migrated ? " — this record was migrated" : ""}</div>
+          <select className="input" style={{ marginTop: 8 }} value={r.status} onChange={(e) => rpc("setRecordStatus", { kind: "request", id: r.id, status: e.target.value }, "Status updated.")}>
+            {ORDER.map((k) => <option key={k} value={k}>{STATUS[k].label}</option>)}
+          </select>
+        </div>
+      </div>
+    )}
     <div className="grid2">
       <div className="panel">
         <div className="fx ac jb" style={{ marginBottom: 14 }}><h3 className="panel-t">Required documents</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{submitted}/{r.docs.length} submitted</span></div>
@@ -414,7 +431,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         <h3 className="panel-t">Details</h3>
         <div><div className="label" style={{ marginBottom: 5 }}>Category</div><div style={{ fontWeight: 700 }}>{c ? catName(c) : "—"}</div><div className="dim th" style={{ fontSize: 13 }}>{c ? catAlt(c) : ""}</div></div>
         <div className="fx gap16">
-          <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Amount</div><div className="mono" style={{ fontWeight: 800, fontSize: 22 }}>{fmt(r.amount)}</div></div>
+          <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Amount</div><div className="mono" style={{ fontWeight: 800, fontSize: 22 }}>{fmt(r.amount)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: r.amount, reason: "" }); setModal({ type: "editNumber", kind: "request", id: r.id, field: "amount", label: "Amount — " + r.id, orig: r.amount }); }} />}</div></div>
           <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Department</div><div style={{ fontWeight: 700 }}>{r.dept}</div></div>
         </div>
         <div className="fx gap16">
@@ -601,7 +618,7 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
                 )}
               </div>
               <div className="fx" style={{ marginTop: 16, gap: 12, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 120, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>BALANCE</div><div className="mono" style={{ fontWeight: 800, fontSize: 20 }}>{fmt(a.balance)}</div></div>
+                <div style={{ flex: 1, minWidth: 120, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>BALANCE</div><div className="mono" style={{ fontWeight: 800, fontSize: 20 }}>{fmt(a.balance)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: a.balance, reason: "" }); setModal({ type: "editNumber", kind: "account", id: a.id, field: "balance", label: "Balance — " + a.name, orig: a.balance }); }} />}</div></div>
                 <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>IN</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(inf)}</div></div>
                 <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>OUT</div><div className="mono neg" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(outf)}</div></div>
               </div>
@@ -613,7 +630,7 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
                       <div key={s.id} className="purse">
                         <span className="purse-dot" style={{ background: s.color }} />
                         <span style={{ fontWeight: 700 }}>{s.name}</span>
-                        <span className="mono dim" style={{ fontWeight: 800 }}>{fmt(s.balance)}</span>
+                        <span className="mono dim" style={{ fontWeight: 800 }}>{fmt(s.balance)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: s.balance, reason: "" }); setModal({ type: "editNumber", kind: "stream", id: s.id, field: "balance", label: "Purse — " + s.name, orig: s.balance }); }} />}</span>
                       </div>
                     ))}
                   </div>
@@ -623,14 +640,14 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
           );
         })}
       </div>
-      <div className="panel"><h3 className="panel-t" style={{ marginBottom: 14 }}>Transactions</h3><div style={{ display: "flex", flexDirection: "column" }}>{data.txns.map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} onEdit={admin ? (txn) => { setForm({ amount: txn.amount, reason: "" }); setModal({ type: "editTxn", txnId: txn.id, txnDesc: txn.desc, oldAmount: txn.amount }); } : null} />)}</div></div>
+      <div className="panel"><h3 className="panel-t" style={{ marginBottom: 14 }}>Transactions</h3><div style={{ display: "flex", flexDirection: "column" }}>{data.txns.map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} onEdit={admin ? (txn) => { setForm({ amount: txn.amount, reason: "" }); setModal({ type: "editTxn", txnId: txn.id, txnDesc: txn.desc, oldAmount: txn.amount }); } : null} onDelete={admin ? (txn) => { setForm({ reason: "" }); setModal({ type: "deleteTxn", txnId: txn.id, txnDesc: txn.desc, txnAmount: txn.amount }); } : null} />)}</div></div>
     </div>
   </>);
 }
 
 /* ---------- Revenue ---------- */
 const RV_LABEL = { projected: "Projected", received: "Received" };
-function Revenue({ data, admin, can, setModal, setForm, rpc }) {
+function Revenue({ data, me, admin, can, setModal, setForm, rpc }) {
   const list = data.revenues || [];
   const canManage = admin || can("accounts");
   const streamName = (id) => (data.streams || []).find((s) => s.id === id)?.name || "—";
@@ -647,10 +664,15 @@ function Revenue({ data, admin, can, setModal, setForm, rpc }) {
               <td><div className="tt">{rv.title}</div><div className="tsub">{rv.id}</div></td>
               <td className="muted">{rv.source || "—"}</td>
               <td className="muted">{rv.streamId ? streamName(rv.streamId) : "—"}</td>
-              <td className="mono" style={{ fontWeight: 800 }}>{fmt(rv.amount)}</td>
+              <td className="mono" style={{ fontWeight: 800 }}>{fmt(rv.amount)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: rv.amount, reason: "" }); setModal({ type: "editNumber", kind: "revenue", id: rv.id, field: "amount", label: "Amount — " + rv.id, orig: rv.amount }); }} />}</td>
               <td className="muted">{fmtDate(rv.expectedDate)}</td>
               <td><span className={"badge " + (rv.status === "received" ? "st-closed" : "st-notified")}>{RV_LABEL[rv.status] || rv.status}</span></td>
-              <td>{rv.status === "projected" && canManage && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("receiveRevenue", { id: rv.id }, "Revenue received.")}><i className="ph ph-check" /> Mark received</button>}</td>
+              <td>
+                {rv.status === "projected" && canManage && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("receiveRevenue", { id: rv.id }, "Revenue received.")}><i className="ph ph-check" /> Mark received</button>}
+                {me.role.isMigrationOperator && <select className="input" style={{ marginTop: 6 }} value={rv.status} onChange={(e) => rpc("setRecordStatus", { kind: "revenue", id: rv.id, status: e.target.value }, "Status updated.")}>
+                  {["projected", "received"].map((s) => <option key={s} value={s}>{RV_LABEL[s]}</option>)}
+                </select>}
+              </td>
             </tr>
           ))}
         </tbody></table></div>
@@ -810,7 +832,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction" };
+  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -832,6 +854,8 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "proofPay") ok = await rpc("attachProofOfPayment", { id: modal.reqId, link: form.link, ref: form.ref, date: form.date, note: form.note }, "Proof of payment attached.");
     else if (modal.type === "payDeposit") ok = await rpc("payDeposit", { id: modal.reqId, amount: form.amount, streamId: form.streamId }, "Deposit paid.");
     else if (modal.type === "correction") ok = await rpc("returnForCorrection", { id: modal.reqId, reason: form.reason }, "Request returned for correction.");
+    else if (modal.type === "editNumber") ok = await rpc("editRecordAmount", { kind: modal.kind, id: modal.id, field: modal.field, newValue: form.newValue, reason: form.reason }, "Correction saved.");
+    else if (modal.type === "deleteTxn") ok = await rpc("deleteTransaction", { id: modal.txnId, reason: form.reason }, "Transaction deleted.");
     if (ok) close();
   };
 
@@ -911,6 +935,17 @@ function Modal({ ctx, modal, form, setForm, close }) {
         {modal.type === "correction" && (<>
           <div className="issue-box" style={{ marginBottom: 16 }}><div className="issue-title"><i className="ph ph-warning-circle" /> Send back to requester</div><div className="muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>The request will return to the Notified stage. Existing attachments remain available for correction.</div></div>
           <div className="field"><label className="label">Reason for the change (required)</label><textarea className="input th" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="e.g. Wrong category selected — should be Hotel Accommodation, not Venue Rental." /></div>
+        </>)}
+
+        {modal.type === "editNumber" && (<>
+          <div className="field"><label className="label">{modal.label}</label><div className="muted" style={{ fontSize: 14 }}>Current: {fmt(modal.orig)}</div></div>
+          <div className="field"><label className="label">Corrected amount</label><input className="input mono" type="number" value={form.newValue ?? ""} onChange={set("newValue")} /></div>
+          <div className="field"><label className="label">Reason for the change</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} /></div>
+        </>)}
+
+        {modal.type === "deleteTxn" && (<>
+          <div className="issue-box" style={{ marginBottom: 16 }}><div className="issue-title"><i className="ph ph-warning-circle" /> Delete this transaction?</div><div className="muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{modal.txnDesc} — {fmt(modal.txnAmount)}. The account balance will be reversed.</div></div>
+          <div className="field"><label className="label">Reason for deletion</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} /></div>
         </>)}
 
         {modal.type === "newUser" && (<>

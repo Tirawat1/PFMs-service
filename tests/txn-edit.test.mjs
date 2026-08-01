@@ -51,3 +51,20 @@ test("editTxnTx updates the txn amount and adjusts the account balance atomicall
   assert.equal(prisma.state.txnUpdates.length, 1);
   assert.deepEqual(prisma.state.txnUpdates[0], { amount: 100 });
 });
+
+test("editTxnTx also adjusts a purse balance when the transaction is tagged with a streamId", async () => {
+  const state = { balance: 5000, streamBalance: 800, txnUpdates: [] };
+  const prisma = {
+    state,
+    $transaction: async (fn) =>
+      fn({
+        txn: { update: async ({ data }) => { state.txnUpdates.push(data); } },
+        account: { update: async ({ data }) => { state.balance += data.balance.increment; } },
+        stream: { update: async ({ data }) => { state.streamBalance += data.balance.increment; } },
+      }),
+  };
+  const result = await editTxnTx(prisma, { id: "t1", acctId: "project", streamId: "s_advance", type: "in", oldAmount: 300, newAmount: 500 });
+  assert.equal(result.delta, 200);
+  assert.equal(state.balance, 5200);
+  assert.equal(state.streamBalance, 1000);
+});

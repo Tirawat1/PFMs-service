@@ -16,6 +16,7 @@ model Role {
   system  Boolean @default(false)
   canSeeAdvances Boolean @default(false)
   approverKey String? // faculty_finance | faculty_purchasing | null — which category approver track this role represents, if any
+  isMigrationOperator Boolean @default(false) // may force a record's status directly, bypassing the normal workflow — for importing historical data
   users   User[]
 }
 
@@ -94,6 +95,7 @@ model Request {
   requesterId       String?
   requesterName     String
   status            String   @default("notified")
+  migrated          Boolean  @default(false)
   issueReason       String   @default("") // set when an officer returns the whole request for correction — persists as a historical annotation
   desc              String   @default("")
   driveFolder       String   @default("")
@@ -127,6 +129,7 @@ model Projection {
   amount        Float
   expectedDate  DateTime @default(now())
   status        String   @default("submitted") // submitted | advanced | linked | settled
+  migrated      Boolean  @default(false)
   requestId     String?
   createdAt     DateTime @default(now())
 }
@@ -140,6 +143,7 @@ model Revenue {
   amount       Float
   expectedDate DateTime  @default(now())
   status       String    @default("projected") // projected | received
+  migrated     Boolean   @default(false)
   receivedAt   DateTime?
   createdAt    DateTime  @default(now())
 }
