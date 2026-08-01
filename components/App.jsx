@@ -445,12 +445,14 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
           <div className="fx gap8" style={{ flexWrap: "wrap" }}>
             <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ vendor: r.vendor || "", amount: String(r.amount), link: "", note: "" }); setModal({ type: "issuePO", reqId: r.id }); }}><i className="ph ph-file-text" /> {r.po ? "Re-issue PO" : "Issue PO"}</button>
             <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ link: "", ref: "", date: new Date().toISOString().slice(0, 10), note: "" }); setModal({ type: "proofPay", reqId: r.id }); }}><i className="ph ph-receipt" /> Attach proof of payment</button>
+            {!r.depositPaid && r.status !== "closed" && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ amount: "", streamId: data.streams?.[0]?.id || "" }); setModal({ type: "payDeposit", reqId: r.id }); }}><i className="ph ph-coins" /> Pay deposit</button>}
           </div>
         )}
         {r.po && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-file-text" /> Purchase order {r.po.number}</div><div style={{ fontSize: 13 }}>{r.po.vendor} — {fmt(r.po.amount)}</div>{r.po.link && <a href={r.po.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View PO ↗</a>}</div>}
         {r.payProof && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-receipt" /> Proof of payment</div><div style={{ fontSize: 13 }}>{r.payProof.ref} — {r.payProof.date}</div><a href={r.payProof.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View slip ↗</a></div>}
+        {r.depositPaid && <div className="drive-banner"><i className="ph ph-coins" /><span>Deposit of {fmt(r.depositAmount)} already paid — only the remaining balance will be deducted at disbursement.</span></div>}
         {canAdv && nextKey !== "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
-        {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "" }); setModal({ type: "disburse", reqId: r.id }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
+        {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "" }); setModal({ type: "disburse", reqId: r.id, depositPaid: r.depositPaid, depositAmount: r.depositAmount }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {!canAdv && nextKey && <div className="dim" style={{ fontSize: 12.5, textAlign: "center", padding: 10, border: "1px dashed var(--line2)", borderRadius: 11, marginTop: "auto" }}>Next step ({ADV_LABELS[nextKey]}) is handled by another role.</div>}
       </div>
     </div>
@@ -806,7 +808,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment" };
+  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -826,6 +828,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "newRevenue") ok = await rpc("createRevenue", form, "Revenue projected.");
     else if (modal.type === "issuePO") ok = await rpc("issuePurchaseOrder", { id: modal.reqId, vendor: form.vendor, amount: form.amount, link: form.link, note: form.note }, "Purchase order issued.");
     else if (modal.type === "proofPay") ok = await rpc("attachProofOfPayment", { id: modal.reqId, link: form.link, ref: form.ref, date: form.date, note: form.note }, "Proof of payment attached.");
+    else if (modal.type === "payDeposit") ok = await rpc("payDeposit", { id: modal.reqId, amount: form.amount, streamId: form.streamId }, "Deposit paid.");
     if (ok) close();
   };
 
@@ -896,6 +899,12 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Note (optional)</label><textarea className="input" style={{ minHeight: 60, resize: "vertical" }} value={form.note || ""} onChange={set("note")} /></div>
         </>)}
 
+        {modal.type === "payDeposit" && (<>
+          {modal.depositPaid && <div className="drive-banner" style={{ marginBottom: 16 }}><i className="ph ph-coins" /><span>Deposit of {fmt(modal.depositAmount)} already paid — only the remaining balance will be deducted.</span></div>}
+          <div className="field"><label className="label">Purse</label><select className="input" value={form.streamId || ""} onChange={set("streamId")}>{(data.streams || []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name} ({fmt(s.balance)})</option>)}</select></div>
+          <div className="field"><label className="label">Deposit amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
+        </>)}
+
         {modal.type === "newUser" && (<>
           <div className="field"><label className="label">Full name</label><input className="input" value={form.name || ""} onChange={set("name")} /></div>
           <div className="fx gap12" style={{ flexWrap: "wrap" }}>
@@ -946,6 +955,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
         </>)}
 
         {modal.type === "disburse" && (<>
+          {modal.depositPaid && <div className="drive-banner" style={{ marginBottom: 16 }}><i className="ph ph-coins" /><span>Deposit of {fmt(modal.depositAmount)} already paid — only the remaining balance will be deducted now.</span></div>}
           <div className="field"><label className="label">Source account</label><select className="input" value={form.acctId || ""} onChange={set("acctId")}>
             <option value="" disabled>Select an account…</option>
             {data.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}

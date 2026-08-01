@@ -15,6 +15,7 @@ import { receiveRevenueTx } from "@/lib/revenue.mjs";
 import { isDocEditable } from "@/lib/doc-phase.mjs";
 import { canApproveCategory } from "@/lib/payment-routing.mjs";
 import { validateVendorAtSubmission } from "@/lib/vendor-required.mjs";
+import { payDepositTx, remainingAfterDeposit } from "@/lib/deposit.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -208,9 +209,16 @@ export async function POST(req) {
           acctName = account?.name || acctId;
         }
 
+        let disburseAmount = r.amount;
+        if (next === "disbursed") {
+          const remaining = remainingAfterDeposit({ requestAmount: r.amount, depositAmount: r.depositAmount, depositPaid: r.depositPaid });
+          if (remaining.error) return err(remaining.error);
+          disburseAmount = remaining.amount;
+        }
+
         const result = await advanceRequestTx(prisma, {
           id: r.id, currentStatus: r.status, nextStatus: next,
-          isDisbursement: next === "disbursed", amount: r.amount, title: r.title,
+          isDisbursement: next === "disbursed", amount: r.depositPaid ? disburseAmount : r.amount, title: r.title,
           acctId, proofLink,
         });
         if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
@@ -230,6 +238,22 @@ export async function POST(req) {
         await audit(me, "Advanced " + r.id + " to " + STATUS[next].label + (next === "disbursed" ? " from account " + acctName : ""));
         await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — " + label + ".", next);
         await notifyPerm("disburse", r.id + " — " + label + ".", next, me.id);
+        return NextResponse.json({ ok: true });
+      }
+      case "payDeposit": {
+        if (!admin && !can(me, "disburse")) return err("Forbidden", 403);
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        if (r.depositPaid) return err("A deposit has already been paid for this request.");
+        const amount = Number(body.amount);
+        if (!Number.isFinite(amount) || amount <= 0) return err("Enter a positive deposit amount.");
+        if (amount >= r.amount) return err("The deposit cannot be the full (or more than the full) request amount — use normal disbursement instead.");
+        const stream = await prisma.stream.findUnique({ where: { id: body.streamId } });
+        if (!stream || !stream.active) return err("Purse is unavailable.");
+        if (stream.balance < amount) return err("Insufficient balance in this purse for the deposit.");
+        await payDepositTx(prisma, { reqId: r.id, streamId: stream.id, amount, projectAcctId: "project", title: r.title });
+        await audit(me, "Paid deposit " + fmt(amount) + " for " + r.id + " from " + stream.name + " purse");
+        await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — deposit of " + fmt(amount) + " paid from " + stream.name + ".", "disbursed");
         return NextResponse.json({ ok: true });
       }
       case "issuePurchaseOrder": {

@@ -106,6 +106,9 @@ model Request {
   disburseProofLink String   @default("")
   vendor            String   @default("")
   vendorExists      Boolean?
+  depositAmount     Float?
+  depositPaid       Boolean  @default(false)
+  depositStreamId   String?
   paidVia           String   @default("finance")
   po                Json?
   payProof          Json?
