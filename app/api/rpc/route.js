@@ -16,6 +16,7 @@ import { isDocEditable } from "@/lib/doc-phase.mjs";
 import { canApproveCategory } from "@/lib/payment-routing.mjs";
 import { validateVendorAtSubmission } from "@/lib/vendor-required.mjs";
 import { payDepositTx, remainingAfterDeposit } from "@/lib/deposit.mjs";
+import { canReturnForCorrection } from "@/lib/return-correction.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -354,6 +355,18 @@ export async function POST(req) {
         await prisma.request.update({ where: { id: r.id }, data: { docs } });
         await audit(me, 'Resolved discrepancy on "' + doc.name + '" (' + r.id + ")");
         await notifyUser(r.requesterId, r.id + ' — discrepancy on "' + doc.name + '" marked solved by ' + me.name + ".", "solved");
+        return NextResponse.json({ ok: true });
+      }
+      case "returnForCorrection": {
+        if (!admin && !can(me, "verify")) return err("Forbidden", 403);
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        const reason = (body.reason || "").trim();
+        const check = canReturnForCorrection({ status: r.status, reason });
+        if (check.error) return err(check.error);
+        await prisma.request.update({ where: { id: r.id }, data: { status: "notified", issueReason: reason } });
+        await audit(me, "Returned " + r.id + " for correction — " + reason);
+        await notifyUser(r.requesterId, r.id + " returned for correction: " + reason, "notified");
         return NextResponse.json({ ok: true });
       }
 

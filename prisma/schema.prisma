@@ -94,6 +94,7 @@ model Request {
   requesterId       String?
   requesterName     String
   status            String   @default("notified")
+  issueReason       String   @default("") // set when an officer returns the whole request for correction — persists as a historical annotation
   desc              String   @default("")
   driveFolder       String   @default("")
   // docs: [{name, submitted, link, fileName,

@@ -354,6 +354,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
     </div>
     <div className="panel"><div className="steps">{ORDER.map((k, i) => <div key={k} className={"step" + (i < ci ? " done" : i === ci ? " cur" : "")}><div className="step-d"><i className={"ph " + STATUS[k].icon} /></div><div className="step-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div></div>
     {openDisc > 0 && <div className="attn" style={{ marginBottom: 0 }}><i className="ph-fill ph-warning" style={{ color: "var(--amber)" }} /><span>{openDisc} document{openDisc > 1 ? "s" : ""} flagged with a discrepancy — revision needed.</span></div>}
+    {r.issueReason && <div className="issue-box" style={{ marginBottom: 0 }}><div className="issue-title"><i className="ph ph-warning-circle" /> Returned for correction</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{r.issueReason}</div></div>}
     <div className="grid2">
       <div className="panel">
         <div className="fx ac jb" style={{ marginBottom: 14 }}><h3 className="panel-t">Required documents</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{submitted}/{r.docs.length} submitted</span></div>
@@ -454,6 +455,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         {canAdv && nextKey !== "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "" }); setModal({ type: "disburse", reqId: r.id, depositPaid: r.depositPaid, depositAmount: r.depositAmount }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {!canAdv && nextKey && <div className="dim" style={{ fontSize: 12.5, textAlign: "center", padding: 10, border: "1px dashed var(--line2)", borderRadius: 11, marginTop: "auto" }}>Next step ({ADV_LABELS[nextKey]}) is handled by another role.</div>}
+        {(admin || can("verify")) && ["docs_submitted", "verified"].includes(r.status) && <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => { setForm({ reason: "" }); setModal({ type: "correction", reqId: r.id }); }}><i className="ph ph-arrow-u-up-left" /> Return for correction</button>}
       </div>
     </div>
   </>);
@@ -808,7 +810,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit" };
+  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -829,6 +831,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "issuePO") ok = await rpc("issuePurchaseOrder", { id: modal.reqId, vendor: form.vendor, amount: form.amount, link: form.link, note: form.note }, "Purchase order issued.");
     else if (modal.type === "proofPay") ok = await rpc("attachProofOfPayment", { id: modal.reqId, link: form.link, ref: form.ref, date: form.date, note: form.note }, "Proof of payment attached.");
     else if (modal.type === "payDeposit") ok = await rpc("payDeposit", { id: modal.reqId, amount: form.amount, streamId: form.streamId }, "Deposit paid.");
+    else if (modal.type === "correction") ok = await rpc("returnForCorrection", { id: modal.reqId, reason: form.reason }, "Request returned for correction.");
     if (ok) close();
   };
 
@@ -903,6 +906,11 @@ function Modal({ ctx, modal, form, setForm, close }) {
           {modal.depositPaid && <div className="drive-banner" style={{ marginBottom: 16 }}><i className="ph ph-coins" /><span>Deposit of {fmt(modal.depositAmount)} already paid — only the remaining balance will be deducted.</span></div>}
           <div className="field"><label className="label">Purse</label><select className="input" value={form.streamId || ""} onChange={set("streamId")}>{(data.streams || []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name} ({fmt(s.balance)})</option>)}</select></div>
           <div className="field"><label className="label">Deposit amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
+        </>)}
+
+        {modal.type === "correction" && (<>
+          <div className="issue-box" style={{ marginBottom: 16 }}><div className="issue-title"><i className="ph ph-warning-circle" /> Send back to requester</div><div className="muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>The request will return to the Notified stage. Existing attachments remain available for correction.</div></div>
+          <div className="field"><label className="label">Reason for the change (required)</label><textarea className="input th" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="e.g. Wrong category selected — should be Hotel Accommodation, not Venue Rental." /></div>
         </>)}
 
         {modal.type === "newUser" && (<>
