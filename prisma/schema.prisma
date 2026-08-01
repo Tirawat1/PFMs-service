@@ -107,6 +107,8 @@ model Request {
   vendor            String   @default("")
   vendorExists      Boolean?
   paidVia           String   @default("finance")
+  po                Json?
+  payProof          Json?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

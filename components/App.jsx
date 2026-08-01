@@ -441,6 +441,14 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
             {r.disburseProofLink && <a href={r.disburseProofLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: "#7cb3ff" }}>View transfer proof ↗</a>}
           </div>
         )}
+        {(admin || can("disburse")) && (
+          <div className="fx gap8" style={{ flexWrap: "wrap" }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ vendor: r.vendor || "", amount: String(r.amount), link: "", note: "" }); setModal({ type: "issuePO", reqId: r.id }); }}><i className="ph ph-file-text" /> {r.po ? "Re-issue PO" : "Issue PO"}</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ link: "", ref: "", date: new Date().toISOString().slice(0, 10), note: "" }); setModal({ type: "proofPay", reqId: r.id }); }}><i className="ph ph-receipt" /> Attach proof of payment</button>
+          </div>
+        )}
+        {r.po && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-file-text" /> Purchase order {r.po.number}</div><div style={{ fontSize: 13 }}>{r.po.vendor} — {fmt(r.po.amount)}</div>{r.po.link && <a href={r.po.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View PO ↗</a>}</div>}
+        {r.payProof && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-receipt" /> Proof of payment</div><div style={{ fontSize: 13 }}>{r.payProof.ref} — {r.payProof.date}</div><a href={r.payProof.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View slip ↗</a></div>}
         {canAdv && nextKey !== "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "" }); setModal({ type: "disburse", reqId: r.id }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {!canAdv && nextKey && <div className="dim" style={{ fontSize: 12.5, textAlign: "center", padding: 10, border: "1px dashed var(--line2)", borderRadius: 11, marginTop: "auto" }}>Next step ({ADV_LABELS[nextKey]}) is handled by another role.</div>}
@@ -798,7 +806,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue" };
+  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -816,6 +824,8 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "addFunds") ok = await rpc("addFunds", { acctId: modal.acctId, amount: form.amount, desc: form.desc }, "Funds added.");
     else if (modal.type === "editTxn") ok = await rpc("editTransaction", { id: modal.txnId, amount: form.amount, reason: form.reason }, "Transaction corrected.");
     else if (modal.type === "newRevenue") ok = await rpc("createRevenue", form, "Revenue projected.");
+    else if (modal.type === "issuePO") ok = await rpc("issuePurchaseOrder", { id: modal.reqId, vendor: form.vendor, amount: form.amount, link: form.link, note: form.note }, "Purchase order issued.");
+    else if (modal.type === "proofPay") ok = await rpc("attachProofOfPayment", { id: modal.reqId, link: form.link, ref: form.ref, date: form.date, note: form.note }, "Proof of payment attached.");
     if (ok) close();
   };
 
@@ -870,6 +880,20 @@ function Modal({ ctx, modal, form, setForm, close }) {
           </select></div>
           <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
           <div className="field"><label className="label">Expected date</label><input className="input" type="date" value={form.expectedDate || ""} onChange={set("expectedDate")} /></div>
+        </>)}
+
+        {modal.type === "issuePO" && (<>
+          <div className="field"><label className="label">Vendor</label><input className="input" value={form.vendor || ""} onChange={set("vendor")} /></div>
+          <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} /></div>
+          <div className="field"><label className="label">Drive link to the signed purchase order</label><input className="input" value={form.link || ""} onChange={set("link")} placeholder="https://drive.google.com/file/d/…" /></div>
+          <div className="field"><label className="label">Note (optional)</label><textarea className="input" style={{ minHeight: 60, resize: "vertical" }} value={form.note || ""} onChange={set("note")} /></div>
+        </>)}
+
+        {modal.type === "proofPay" && (<>
+          <div className="field"><label className="label">Transfer slip link</label><input className="input" value={form.link || ""} onChange={set("link")} placeholder="https://… (bank slip / statement)" /></div>
+          <div className="field"><label className="label">Transfer reference</label><input className="input" value={form.ref || ""} onChange={set("ref")} placeholder="TRF-88213" /></div>
+          <div className="field"><label className="label">Date</label><input className="input" type="date" value={form.date || ""} onChange={set("date")} /></div>
+          <div className="field"><label className="label">Note (optional)</label><textarea className="input" style={{ minHeight: 60, resize: "vertical" }} value={form.note || ""} onChange={set("note")} /></div>
         </>)}
 
         {modal.type === "newUser" && (<>

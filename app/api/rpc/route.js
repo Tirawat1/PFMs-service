@@ -232,6 +232,31 @@ export async function POST(req) {
         await notifyPerm("disburse", r.id + " — " + label + ".", next, me.id);
         return NextResponse.json({ ok: true });
       }
+      case "issuePurchaseOrder": {
+        if (!admin && !can(me, "disburse")) return err("Forbidden", 403);
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        const vendor = (body.vendor || r.vendor || "").trim();
+        if (!vendor) return err("Enter the vendor name.");
+        const amount = Number(body.amount) || r.amount;
+        const counter = await prisma.counter.update({ where: { id: "po" }, data: { value: { increment: 1 } } });
+        const number = "PO-" + counter.value;
+        const po = { number, vendor, amount, link: body.link || null, note: body.note || "", issuedAt: Date.now(), issuedBy: me.name };
+        await prisma.request.update({ where: { id: r.id }, data: { po } });
+        await audit(me, "Issued purchase order " + number + " for " + r.id + " to " + vendor);
+        await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — purchase order " + number + " issued.", "notified");
+        return NextResponse.json({ ok: true, number });
+      }
+      case "attachProofOfPayment": {
+        if (!admin && !can(me, "disburse")) return err("Forbidden", 403);
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        if (!body.link) return err("Paste a link to the transfer slip / statement.");
+        const payProof = { link: body.link.trim(), ref: body.ref || "", date: body.date || new Date().toISOString().slice(0, 10), note: body.note || "", by: me.name, byRole: me.role.name, ts: Date.now() };
+        await prisma.request.update({ where: { id: r.id }, data: { payProof } });
+        await audit(me, "Attached proof of payment for " + r.id);
+        return NextResponse.json({ ok: true });
+      }
 
       // ---------- documents ----------
       case "attachDoc":
