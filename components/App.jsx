@@ -14,6 +14,7 @@ const NAV = [
   { key: "projections", label: "Projected Expenses", icon: "ph-chart-line-up", perm: "requests" },
   { key: "categories", label: "Expense Categories", icon: "ph-tag", perm: "dashboard" },
   { key: "accounts", label: "Accounts", icon: "ph-bank", perm: "accounts" },
+  { key: "revenue", label: "Revenue", icon: "ph-trend-up", perm: "accounts" },
   { key: "notifs", label: "Notifications", icon: "ph-bell", perm: "notifications" },
   { key: "users", label: "Users & Roles", icon: "ph-users-three", perm: "*" },
   { key: "docmenu", label: "Document Menu", icon: "ph-files", perm: "*" },
@@ -77,7 +78,7 @@ export default function App() {
   const navItems = NAV.filter((n) => n.key === "projections"
     ? (admin || can(n.perm) || me.role?.canSeeAdvances)
     : (n.perm === "*" ? admin : can(n.perm)));
-  const titleMap = { dashboard: "Dashboard", requests: "Reimbursements", detail: "Request detail", projections: "Projected Expenses", categories: "Expense Categories", catedit: "Edit category", accounts: "Accounts", users: "Users & Roles", docmenu: "Document Menu", audit: "Audit Trail", notifs: "Notifications", settings: "Settings" };
+  const titleMap = { dashboard: "Dashboard", requests: "Reimbursements", detail: "Request detail", projections: "Projected Expenses", categories: "Expense Categories", catedit: "Edit category", accounts: "Accounts", revenue: "Revenue", users: "Users & Roles", docmenu: "Document Menu", audit: "Audit Trail", notifs: "Notifications", settings: "Settings" };
 
   const ctx = { me, data, admin, can, lang, catName, catAlt, go, rpc, setModal, setForm, showToast, reqFilter, setReqFilter, detailId, catId, refresh };
 
@@ -127,6 +128,7 @@ export default function App() {
             {screen === "categories" && <Categories {...ctx} />}
             {screen === "catedit" && <CatEdit {...ctx} />}
             {screen === "accounts" && <Accounts {...ctx} />}
+            {screen === "revenue" && <Revenue {...ctx} />}
             {screen === "users" && <Users {...ctx} />}
             {screen === "docmenu" && <DocMenu {...ctx} />}
             {screen === "audit" && <AuditTrail {...ctx} />}
@@ -529,11 +531,56 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
                 <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>IN</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(inf)}</div></div>
                 <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>OUT</div><div className="mono neg" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(outf)}</div></div>
               </div>
+              {a.id === "project" && (data.streams || []).filter((s) => s.acctId === "project").length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div className="label" style={{ marginBottom: 8 }}>Purses</div>
+                  <div className="fx gap8" style={{ flexWrap: "wrap" }}>
+                    {data.streams.filter((s) => s.acctId === "project").map((s) => (
+                      <div key={s.id} className="purse">
+                        <span className="purse-dot" style={{ background: s.color }} />
+                        <span style={{ fontWeight: 700 }}>{s.name}</span>
+                        <span className="mono dim" style={{ fontWeight: 800 }}>{fmt(s.balance)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
       <div className="panel"><h3 className="panel-t" style={{ marginBottom: 14 }}>Transactions</h3><div style={{ display: "flex", flexDirection: "column" }}>{data.txns.map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} onEdit={admin ? (txn) => { setForm({ amount: txn.amount, reason: "" }); setModal({ type: "editTxn", txnId: txn.id, txnDesc: txn.desc, oldAmount: txn.amount }); } : null} />)}</div></div>
+    </div>
+  </>);
+}
+
+/* ---------- Revenue ---------- */
+const RV_LABEL = { projected: "Projected", received: "Received" };
+function Revenue({ data, admin, can, setModal, setForm, rpc }) {
+  const list = data.revenues || [];
+  const canManage = admin || can("accounts");
+  const streamName = (id) => (data.streams || []).find((s) => s.id === id)?.name || "—";
+  return (<>
+    <div className="pagehead">
+      <div><h1 className="h1 dsp">Projected <span className="gradt">Revenue</span></h1><p className="sub">Who is paying us, how much, when — and which purse each payment goes into.</p></div>
+      {canManage && <button className="btn btn-primary grad" onClick={() => { setForm({ title: "", source: "", amount: "", expectedDate: new Date().toISOString().slice(0, 10), streamId: data.streams?.[0]?.id || "" }); setModal({ type: "newRevenue" }); }}><i className="ph ph-plus" /> Projected revenue</button>}
+    </div>
+    <div className="panel" style={{ padding: "8px 8px 4px" }}>
+      {list.length === 0 ? <div className="empty"><i className="ph ph-trend-up" />No projected revenue yet.</div> : (
+        <div className="tblwrap"><table className="tbl"><thead><tr><th>Title</th><th>Source</th><th>Purse</th><th>Amount</th><th>Expected date</th><th>Status</th><th /></tr></thead><tbody>
+          {list.map((rv) => (
+            <tr key={rv.id} className="trow">
+              <td><div className="tt">{rv.title}</div><div className="tsub">{rv.id}</div></td>
+              <td className="muted">{rv.source || "—"}</td>
+              <td className="muted">{rv.streamId ? streamName(rv.streamId) : "—"}</td>
+              <td className="mono" style={{ fontWeight: 800 }}>{fmt(rv.amount)}</td>
+              <td className="muted">{fmtDate(rv.expectedDate)}</td>
+              <td><span className={"badge " + (rv.status === "received" ? "st-closed" : "st-notified")}>{RV_LABEL[rv.status] || rv.status}</span></td>
+              <td>{rv.status === "projected" && canManage && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("receiveRevenue", { id: rv.id }, "Revenue received.")}><i className="ph ph-check" /> Mark received</button>}</td>
+            </tr>
+          ))}
+        </tbody></table></div>
+      )}
     </div>
   </>);
 }
@@ -682,7 +729,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount" };
+  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -699,6 +746,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "newAccount") ok = await rpc("createAccount", form, "Account created.");
     else if (modal.type === "addFunds") ok = await rpc("addFunds", { acctId: modal.acctId, amount: form.amount, desc: form.desc }, "Funds added.");
     else if (modal.type === "editTxn") ok = await rpc("editTransaction", { id: modal.txnId, amount: form.amount, reason: form.reason }, "Transaction corrected.");
+    else if (modal.type === "newRevenue") ok = await rpc("createRevenue", form, "Revenue projected.");
     if (ok) close();
   };
 
@@ -734,6 +782,17 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Current amount</label><div className="mono" style={{ fontWeight: 800, fontSize: 18 }}>{fmt(modal.oldAmount)}</div></div>
           <div className="field"><label className="label">Corrected amount (THB)</label><input className="input mono" type="number" value={form.amount ?? ""} onChange={set("amount")} placeholder="0" /></div>
           <div className="field"><label className="label">Reason for correction</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="e.g. Extra zero entered by mistake" /></div>
+        </>)}
+
+        {modal.type === "newRevenue" && (<>
+          <div className="field"><label className="label">Title</label><input className="input" value={form.title || ""} onChange={set("title")} placeholder="e.g. Sponsorship — Acme Co." /></div>
+          <div className="field"><label className="label">Source (optional)</label><input className="input" value={form.source || ""} onChange={set("source")} /></div>
+          <div className="field"><label className="label">Purse</label><select className="input" value={form.streamId || ""} onChange={set("streamId")}>
+            <option value="">No purse</option>
+            {(data.streams || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select></div>
+          <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
+          <div className="field"><label className="label">Expected date</label><input className="input" type="date" value={form.expectedDate || ""} onChange={set("expectedDate")} /></div>
         </>)}
 
         {modal.type === "newUser" && (<>

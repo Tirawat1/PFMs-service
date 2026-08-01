@@ -58,13 +58,24 @@ model Account {
   active  Boolean @default(true)
 }
 
+model Stream {
+  id      String  @id @default(cuid()) // a "purse" — a named sub-total inside an Account
+  acctId  String
+  name    String
+  nameTh  String  @default("")
+  color   String  @default("#f0378a")
+  balance Float   @default(0)
+  active  Boolean @default(true)
+}
+
 model Txn {
-  id     String   @id @default(cuid())
-  acctId String
-  type   String // "in" | "out"
-  amount Float
-  desc   String
-  date   DateTime @default(now())
+  id       String   @id @default(cuid())
+  acctId   String
+  streamId String?
+  type     String // "in" | "out"
+  amount   Float
+  desc     String
+  date     DateTime @default(now())
 }
 
 model Request {
@@ -104,6 +115,19 @@ model Projection {
   status        String   @default("submitted") // submitted | advanced | linked | settled
   requestId     String?
   createdAt     DateTime @default(now())
+}
+
+model Revenue {
+  id           String    @id // e.g. RV-3000
+  title        String
+  source       String    @default("")
+  acctId       String    @default("project")
+  streamId     String?
+  amount       Float
+  expectedDate DateTime  @default(now())
+  status       String    @default("projected") // projected | received
+  receivedAt   DateTime?
+  createdAt    DateTime  @default(now())
 }
 
 model Notification {

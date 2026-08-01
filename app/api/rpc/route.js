@@ -11,6 +11,7 @@ import { approveProjectionTx, settleProjectionTx } from "@/lib/projections.mjs";
 import { resolveRequestSource } from "@/lib/direct-claim.mjs";
 import { addVendorDocs } from "@/lib/vendor-docs.mjs";
 import { editTxnTx } from "@/lib/txn-edit.mjs";
+import { receiveRevenueTx } from "@/lib/revenue.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -355,6 +356,48 @@ export async function POST(req) {
         });
         await audit(me, "Created account " + acct.name);
         return NextResponse.json({ ok: true, id: acct.id });
+      }
+      case "createStream": {
+        if (!admin) return err("Forbidden", 403);
+        if (!body.name) return err("Enter a purse name.");
+        const s = await prisma.stream.create({
+          data: { acctId: body.acctId || "project", name: body.name, nameTh: body.nameTh || body.name, color: body.color || "#f0378a" },
+        });
+        await audit(me, "Created purse " + s.name);
+        return NextResponse.json({ ok: true, id: s.id });
+      }
+      case "createRevenue": {
+        if (!admin && !can(me, "accounts")) return err("Forbidden", 403);
+        const { title, source, amount, expectedDate, streamId } = body;
+        const parsedAmount = Number(amount);
+        if (!title) return err("Enter a title.");
+        if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return err("Enter a positive amount.");
+        const counter = await prisma.counter.update({ where: { id: "revenue" }, data: { value: { increment: 1 } } });
+        const id = "RV-" + counter.value;
+        await prisma.revenue.create({
+          data: {
+            id, title, source: source || "", amount: parsedAmount, streamId: streamId || null,
+            expectedDate: expectedDate ? new Date(expectedDate) : new Date(),
+          },
+        });
+        await audit(me, "Projected revenue " + id + " — " + title + " (" + fmt(parsedAmount) + ")");
+        return NextResponse.json({ ok: true, id });
+      }
+      case "receiveRevenue": {
+        if (!admin && !can(me, "accounts")) return err("Forbidden", 403);
+        const rv = await prisma.revenue.findUnique({ where: { id: body.id } });
+        if (!rv) return err("Not found", 404);
+        if (rv.status !== "projected") return err("This revenue is already recorded.");
+        const acct = await prisma.account.findUnique({ where: { id: rv.acctId } });
+        if (!acct || !acct.active) return err("Target account is unavailable.");
+        const result = await receiveRevenueTx(prisma, {
+          id: rv.id, currentStatus: "projected", amount: rv.amount,
+          acctId: rv.acctId, streamId: rv.streamId, title: rv.title,
+        });
+        if (result.conflict) return err("This revenue was already recorded.");
+        await audit(me, "Received revenue " + rv.id + " (" + fmt(rv.amount) + ")");
+        await notifyPerm("accounts", rv.id + " — revenue received: " + fmt(rv.amount) + ".", "disbursed", me.id);
+        return NextResponse.json({ ok: true });
       }
       case "updateAccount": {
         if (!admin) return err("Forbidden", 403);
