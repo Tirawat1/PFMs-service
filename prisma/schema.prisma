@@ -15,6 +15,7 @@ model Role {
   contact String  @default("")
   system  Boolean @default(false)
   canSeeAdvances Boolean @default(false)
+  approverKey String? // faculty_finance | faculty_purchasing | null — which category approver track this role represents, if any
   users   User[]
 }
 
@@ -44,6 +45,8 @@ model Category {
   defaultAcctId String?
   active        Boolean @default(true) // soft-close, never hard-delete — existing requests still reference categoryId
   allowDirect   Boolean @default(false) // may be reimbursed without a projected-expense advance
+  defaultPaidVia String @default("finance") // finance | purchasing | psat — who typically processes this category's payments
+  approverRole   String @default("faculty_finance") // faculty_finance | faculty_purchasing — which approver track verifies this category
 }
 
 model MasterDoc {
@@ -102,6 +105,7 @@ model Request {
   disburseProofLink String   @default("")
   vendor            String   @default("")
   vendorExists      Boolean?
+  paidVia           String   @default("finance")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

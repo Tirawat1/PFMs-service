@@ -416,6 +416,9 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
           <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Amount</div><div className="mono" style={{ fontWeight: 800, fontSize: 22 }}>{fmt(r.amount)}</div></div>
           <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Department</div><div style={{ fontWeight: 700 }}>{r.dept}</div></div>
         </div>
+        <div className="fx gap16">
+          <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Paid via</div><div style={{ fontWeight: 700 }}>{{ finance: "Faculty Finance Officer", purchasing: "Faculty Purchasing Officer", psat: "PSAT" }[r.paidVia] || r.paidVia}</div></div>
+        </div>
         <div><div className="label" style={{ marginBottom: 5 }}>Description</div><div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{r.desc || "Reimbursement request submitted by " + r.requesterName + "."}</div></div>
         {c && c.notes && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--soft)", border: "1px solid rgba(240,55,138,.2)" }}><div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent2)", marginBottom: 5 }}><i className="ph ph-info" /> Category note</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{c.notes}</div></div>}
         {(isRequester || admin) && r.vendorExists == null && (
@@ -515,6 +518,21 @@ function CatEdit({ data, go, rpc, catId }) {
         <div className="fx ac jb" style={{ marginTop: 16 }}>
           <div><div style={{ fontWeight: 700, fontSize: 14 }}>Allow direct reimbursement</div><div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>Departments may submit this category without a projected expense.</div></div>
           <div className={"switch" + (c.allowDirect ? " on" : "")} onClick={() => rpc("toggleCategoryDirect", { id: c.id })} />
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <label className="label">Default paid via</label>
+          <select className="input" value={c.defaultPaidVia} onChange={(e) => rpc("updateCategoryPaymentRouting", { id: c.id, defaultPaidVia: e.target.value, approverRole: c.approverRole })}>
+            <option value="finance">Faculty Finance Officer</option>
+            <option value="purchasing">Faculty Purchasing Officer</option>
+            <option value="psat">PSAT</option>
+          </select>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <label className="label">Approver track</label>
+          <select className="input" value={c.approverRole} onChange={(e) => rpc("updateCategoryPaymentRouting", { id: c.id, defaultPaidVia: c.defaultPaidVia, approverRole: e.target.value })}>
+            <option value="faculty_finance">Faculty Finance</option>
+            <option value="faculty_purchasing">Faculty Purchasing</option>
+          </select>
         </div>
       </div>
       <div className="panel">
@@ -653,6 +671,13 @@ function Users({ me, admin, data, rpc, setModal, setForm }) {
           <div className="dim th" style={{ fontSize: 12.5 }}>{r.nameTh}</div>
           <div className="chipwrap">{((r.perms || []).includes("*") ? ["full access"] : r.perms).map((p) => <span key={p} className="doc-chip" style={{ padding: "4px 9px", fontSize: 11.5 }}>{p}</span>)}</div>
           <span className="mig-chip pointer" style={admin ? {} : { opacity: 0.6, cursor: "default" }} onClick={() => admin && rpc("toggleRoleAdvDash", { id: r.id })}><i className={r.canSeeAdvances ? "ph-fill ph-chart-line-up" : "ph ph-chart-line-up"} /> Sees Projected Expenses: {r.canSeeAdvances ? "on" : "off"}</span>
+          {admin
+            ? <select className="input" style={{ padding: "6px 10px", fontSize: 12.5 }} value={r.approverKey || ""} onChange={(e) => rpc("updateRoleApproverKey", { id: r.id, approverKey: e.target.value || null })}>
+                <option value="">No approver track</option>
+                <option value="faculty_finance">Faculty Finance approver</option>
+                <option value="faculty_purchasing">Faculty Purchasing approver</option>
+              </select>
+            : <span className="dim" style={{ fontSize: 11.5 }}>{r.approverKey ? "Approver: " + r.approverKey : "No approver track"}</span>}
           <div className="dim" style={{ fontSize: 12, borderTop: "1px solid var(--line)", paddingTop: 9 }}><i className="ph ph-user-circle" /> Contact: <span style={{ color: "var(--txt)", fontWeight: 600 }}>{r.contact || "—"}</span></div>
         </div>
       ))}
@@ -806,6 +831,11 @@ function Modal({ ctx, modal, form, setForm, close }) {
           )}
           <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
           <div className="field"><label className="label">Event date (when the expense actually happened)</label><input className="input" type="date" value={form.eventDate || ""} onChange={set("eventDate")} /></div>
+          <div className="field"><label className="label">Paid via</label><select className="input" value={form.paidVia || selCat?.defaultPaidVia || "finance"} onChange={set("paidVia")}>
+            <option value="finance">Faculty Finance Officer</option>
+            <option value="purchasing">Faculty Purchasing Officer</option>
+            <option value="psat">PSAT</option>
+          </select></div>
           <div className="field"><label className="label">Description</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.desc || ""} onChange={set("desc")} placeholder="Purpose of this expense…" /></div>
           {selCat && (selCat.docsPre.length + selCat.docsPost.length) > 0 && <div className="field"><label className="label">Documents required for this category</label><div className="chipwrap">{[...selCat.docsPre, ...selCat.docsPost].map((d) => <span key={d} className="doc-chip th" style={{ padding: "5px 10px", fontSize: 12 }}>{d}</span>)}</div></div>}
         </>)}

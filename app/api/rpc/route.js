@@ -13,6 +13,7 @@ import { addVendorDocs } from "@/lib/vendor-docs.mjs";
 import { editTxnTx } from "@/lib/txn-edit.mjs";
 import { receiveRevenueTx } from "@/lib/revenue.mjs";
 import { isDocEditable } from "@/lib/doc-phase.mjs";
+import { canApproveCategory } from "@/lib/payment-routing.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -55,7 +56,7 @@ export async function POST(req) {
       // ---------- requests ----------
       case "createRequest": {
         if (!can(me, "create")) return err("Forbidden", 403);
-        const { title, categoryId, amount, desc, eventDate, projectionId } = body;
+        const { title, categoryId, amount, desc, eventDate, projectionId, paidVia } = body;
         if (!title || !categoryId) return err("Fill title and category.");
         const cat = await prisma.category.findUnique({ where: { id: categoryId } });
         if (!cat || !cat.active) return err("Unknown category.");
@@ -84,6 +85,7 @@ export async function POST(req) {
             driveFolder: "https://drive.google.com/drive/folders/PFMS-" + id,
             projectionId: projectionId || null,
             directClaim: source.directClaim,
+            paidVia: paidVia || cat.defaultPaidVia,
           },
         });
         if (proj) {
@@ -121,6 +123,10 @@ export async function POST(req) {
         if (!can(me, "verify") && !admin) return err("Forbidden", 403);
         const proj = await prisma.projection.findUnique({ where: { id: body.id } });
         if (!proj) return err("Not found", 404);
+        const projCat = await prisma.category.findUnique({ where: { id: proj.categoryId } });
+        if (!canApproveCategory({ admin, hasVerifyPerm: can(me, "verify"), roleApproverKey: me.role.approverKey, categoryApproverRole: projCat?.approverRole })) {
+          return err("This expense category is routed to another approver.");
+        }
         if (proj.status !== "submitted") return err("This projection cannot be approved.");
         const faculty = await prisma.account.findUnique({ where: { id: "faculty" } });
         const project = await prisma.account.findUnique({ where: { id: "project" } });
@@ -169,6 +175,12 @@ export async function POST(req) {
         if (i >= ORDER.length - 1) return err("Already closed.");
         const next = ORDER[i + 1];
         if (!admin && !can(me, ADV_PERM[next])) return err("Forbidden", 403);
+        if (next === "verified") {
+          const rCat = await prisma.category.findUnique({ where: { id: r.categoryId } });
+          if (!canApproveCategory({ admin, hasVerifyPerm: can(me, "verify"), roleApproverKey: me.role.approverKey, categoryApproverRole: rCat?.approverRole })) {
+            return err("This expense category is routed to another approver.");
+          }
+        }
 
         let acctId, proofLink, acctName;
         if (next === "disbursed") {
@@ -302,6 +314,17 @@ export async function POST(req) {
       case "updateCategoryAccount": {
         if (!admin) return err("Forbidden", 403);
         await prisma.category.update({ where: { id: body.id }, data: { defaultAcctId: body.defaultAcctId || null } });
+        return NextResponse.json({ ok: true });
+      }
+      case "updateCategoryPaymentRouting": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        await prisma.category.update({
+          where: { id: c.id },
+          data: { defaultPaidVia: body.defaultPaidVia || "finance", approverRole: body.approverRole || "faculty_finance" },
+        });
+        await audit(me, "Updated payment routing for category " + c.name);
         return NextResponse.json({ ok: true });
       }
       case "closeCategory": {
@@ -503,6 +526,16 @@ export async function POST(req) {
           data: { name: body.name, nameTh: body.nameTh || body.name, perms: body.perms || ["dashboard"], contact: body.contact || "" },
         });
         await audit(me, "Created role " + body.name);
+        return NextResponse.json({ ok: true });
+      }
+      case "updateRoleApproverKey": {
+        if (!admin) return err("Forbidden", 403);
+        const role = await prisma.role.findUnique({ where: { id: body.id } });
+        if (!role) return err("Not found", 404);
+        const key = body.approverKey || null;
+        if (key && !["faculty_finance", "faculty_purchasing"].includes(key)) return err("Unknown approver key.");
+        await prisma.role.update({ where: { id: role.id }, data: { approverKey: key } });
+        await audit(me, "Set approver key for role " + role.name + " to " + (key || "none"));
         return NextResponse.json({ ok: true });
       }
       case "deleteRole": {
