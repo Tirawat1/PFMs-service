@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ORDER, STATUS, PERMKEYS, ADV_LABELS, ADV_PERM } from "@/lib/constants";
+import { isDocEditable } from "@/lib/doc-phase.mjs";
 
 const fmt = (n) => "฿" + Math.round(n).toLocaleString("en-US");
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
@@ -357,40 +358,56 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
       <div className="panel">
         <div className="fx ac jb" style={{ marginBottom: 14 }}><h3 className="panel-t">Required documents</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{submitted}/{r.docs.length} submitted</span></div>
         {r.driveFolder && <a className="drive-banner" href={r.driveFolder} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit", marginBottom: 14, display: "flex" }}><i className="ph ph-google-drive-logo" /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 700, fontSize: 12.5 }}>Google Drive folder connected</div><div className="dim" style={{ fontSize: 11.5 }}>Submitted documents are stored here</div></div><span className="drive-open">Open folder ↗</span></a>}
-        {r.docs.length === 0 ? <div className="empty" style={{ padding: 26 }}><i className="ph ph-files" />No document checklist for this category.</div> : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-            {r.docs.map((d, i) => {
-              const disc = d.disc;
-              return (
-                <div key={i} className={"doc" + (d.submitted ? " on" : "") + (disc && disc.open ? " flagged" : "")}>
-                  <div className="chk"><i className="ph ph-check" /></div>
-                  <div style={{ flex: 1, minWidth: 120 }}>
-                    <span style={{ fontSize: 13.5 }}>{d.name}</span>
-                    {d.fileName && <div className="dim" style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.fileName}</div>}
-                  </div>
-                  <div className="doc-actions">
-                    {disc && disc.open && <span className={"disc-tag " + (disc.fixed ? "fixed" : "open")}><i className={"ph " + (disc.fixed ? "ph-arrows-clockwise" : "ph-warning")} />{disc.fixed ? "Revised — recheck" : "Discrepancy"}</span>}
-                    {d.submitted && d.link && <a className="doc-view" href={d.link} target="_blank" rel="noreferrer"><i className="ph ph-google-drive-logo" /> View</a>}
-                    {!d.submitted && (isRequester || can("create") || admin) && <button className="doc-attach" onClick={() => { setForm({ link: "", fileName: "" }); setModal({ type: "attach", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-paperclip" /> Attach</button>}
-                    {d.submitted && (isRequester || can("create") || admin) && !(disc && disc.open) && <i className="ph ph-x doc-x" title="Remove" onClick={() => rpc("detachDoc", { id: r.id, idx: i })} />}
-                    {canOfficer && d.submitted && !(disc && disc.open) && <button className="doc-attach warn" onClick={() => { setForm({ note: "" }); setModal({ type: "flagDisc", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-flag" /> Flag issue</button>}
-                  </div>
-                  {disc && disc.open && (
-                    <div className={"disc-box" + (disc.fixed ? " fixed" : "")}>
-                      <div style={{ fontWeight: 800, marginBottom: 3 }}><i className="ph ph-warning" /> Discrepancy — flagged by {disc.by} · {fmtTime(disc.ts)}</div>
-                      <div className="muted th">{disc.note || "Please revise this document."}</div>
-                      {disc.fixed && <div style={{ marginTop: 6, color: "#0e7490", fontWeight: 700 }}><i className="ph ph-arrows-clockwise" /> Marked as revised{disc.fixedNote ? ": " + disc.fixedNote : ""} — awaiting officer re-check.</div>}
-                      <div className="fx gap8" style={{ marginTop: 9, flexWrap: "wrap" }}>
-                        {(isRequester || can("create")) && !disc.fixed && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ note: "" }); setModal({ type: "markFixed", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-arrows-clockwise" /> I changed the document</button>}
-                        {canOfficer && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("resolveDiscrepancy", { id: r.id, idx: i }, "Discrepancy marked solved.")}><i className="ph ph-check" /> Case solved</button>}
-                      </div>
-                    </div>
-                  )}
+        {r.docs.length === 0 ? <div className="empty" style={{ padding: 26 }}><i className="ph ph-files" />No document checklist for this category.</div> : (<>
+          {[{ phase: "pre", label: "Pre-reimbursement documents", lockHint: "Locked after verification" }, { phase: "post", label: "Closing documents", lockHint: "Available once funds are disbursed" }].map(({ phase, label, lockHint }) => {
+            const rows = r.docs.map((d, i) => ({ d, i })).filter(({ d }) => (d.phase || "pre") === phase);
+            if (rows.length === 0) return null;
+            const locked = !isDocEditable({ phase, status: r.status });
+            return (
+              <div key={phase} style={{ marginBottom: 16 }}>
+                <div className="fx ac gap8" style={{ marginBottom: 9 }}>
+                  <span className="label" style={{ margin: 0 }}>{label}</span>
+                  {locked && <span className="dim" style={{ fontSize: 11 }}><i className="ph ph-lock-simple" /> {lockHint}</span>}
                 </div>
-              );
-            })}
-          </div>
-        )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                  {rows.map(({ d, i }) => {
+                    const disc = d.disc;
+                    const example = c && c.docExamples && c.docExamples[d.name];
+                    const editable = isDocEditable({ phase: d.phase || "pre", status: r.status });
+                    return (
+                      <div key={i} className={"doc" + (d.submitted ? " on" : "") + (disc && disc.open ? " flagged" : "")}>
+                        <div className="chk"><i className="ph ph-check" /></div>
+                        <div style={{ flex: 1, minWidth: 120 }}>
+                          <span style={{ fontSize: 13.5 }}>{d.name}</span>
+                          {d.fileName && <div className="dim" style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.fileName}</div>}
+                        </div>
+                        <div className="doc-actions">
+                          {example && <a className="doc-view" href={example.link} target="_blank" rel="noreferrer"><i className="ph ph-lightbulb" /> Example</a>}
+                          {disc && disc.open && <span className={"disc-tag " + (disc.fixed ? "fixed" : "open")}><i className={"ph " + (disc.fixed ? "ph-arrows-clockwise" : "ph-warning")} />{disc.fixed ? "Revised — recheck" : "Discrepancy"}</span>}
+                          {d.submitted && d.link && <a className="doc-view" href={d.link} target="_blank" rel="noreferrer"><i className="ph ph-google-drive-logo" /> View</a>}
+                          {!d.submitted && editable && (isRequester || can("create") || admin) && <button className="doc-attach" onClick={() => { setForm({ link: "", fileName: "" }); setModal({ type: "attach", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-paperclip" /> Attach</button>}
+                          {d.submitted && editable && (isRequester || can("create") || admin) && !(disc && disc.open) && <i className="ph ph-x doc-x" title="Remove" onClick={() => rpc("detachDoc", { id: r.id, idx: i })} />}
+                          {canOfficer && d.submitted && !(disc && disc.open) && <button className="doc-attach warn" onClick={() => { setForm({ note: "" }); setModal({ type: "flagDisc", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-flag" /> Flag issue</button>}
+                        </div>
+                        {disc && disc.open && (
+                          <div className={"disc-box" + (disc.fixed ? " fixed" : "")}>
+                            <div style={{ fontWeight: 800, marginBottom: 3 }}><i className="ph ph-warning" /> Discrepancy — flagged by {disc.by} · {fmtTime(disc.ts)}</div>
+                            <div className="muted th">{disc.note || "Please revise this document."}</div>
+                            {disc.fixed && <div style={{ marginTop: 6, color: "#0e7490", fontWeight: 700 }}><i className="ph ph-arrows-clockwise" /> Marked as revised{disc.fixedNote ? ": " + disc.fixedNote : ""} — awaiting officer re-check.</div>}
+                            <div className="fx gap8" style={{ marginTop: 9, flexWrap: "wrap" }}>
+                              {(isRequester || can("create")) && !disc.fixed && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ note: "" }); setModal({ type: "markFixed", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-arrows-clockwise" /> I changed the document</button>}
+                              {canOfficer && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("resolveDiscrepancy", { id: r.id, idx: i }, "Discrepancy marked solved.")}><i className="ph ph-check" /> Case solved</button>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </>)}
       </div>
       <div className="panel" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <h3 className="panel-t">Details</h3>
@@ -439,7 +456,7 @@ function Categories({ data, admin, catName, catAlt, go, setModal, setForm, rpc }
     <div className="grid3">
       {data.categories.map((c) => (
         <div key={c.id} className="catcard" style={c.active === false ? { opacity: 0.55 } : {}} onClick={() => admin && go("catedit", { catId: c.id })}>
-          <div className="fx ac jb"><div className="acct-ic grad" style={{ width: 40, height: 40, fontSize: 19 }}><i className={"ph " + c.icon} /></div><span className="tag">{c.docs.length} docs</span></div>
+          <div className="fx ac jb"><div className="acct-ic grad" style={{ width: 40, height: 40, fontSize: 19 }}><i className={"ph " + c.icon} /></div><span className="tag">{c.docsPre.length + c.docsPost.length} docs</span></div>
           <div><div style={{ fontWeight: 800, fontSize: 15.5 }}>{catName(c)}{c.active === false && <span className="dim" style={{ fontSize: 11.5, marginLeft: 8 }}>(closed)</span>}</div><div className="dim th" style={{ fontSize: 13, marginTop: 2 }}>{catAlt(c)}</div></div>
           {c.notes && <div className="dim th" style={{ fontSize: 12, lineHeight: 1.4, borderTop: "1px solid var(--line)", paddingTop: 10 }}><i className="ph ph-info" style={{ color: "var(--accent2)" }} /> {c.notes}</div>}
           {admin && c.active !== false && <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); rpc("closeCategory", { id: c.id }, "Category closed."); }}><i className="ph ph-x" /> Close</button>}
@@ -453,14 +470,37 @@ function CatEdit({ data, go, rpc, catId }) {
   const c = data.categories.find((x) => x.id === catId);
   const [note, setNote] = useState(c ? c.notes : "");
   const [draft, setDraft] = useState("");
+  const [phase, setPhase] = useState("pre");
+  const [exampleDraft, setExampleDraft] = useState({});
   if (!c) return null;
+  const list = phase === "post" ? c.docsPost : c.docsPre;
+  const examples = c.docExamples || {};
   return (<>
     <div className="fx ac gap12"><button className="iconbtn" onClick={() => go("categories")}><i className="ph ph-arrow-left" /></button><div><h1 className="h1 dsp" style={{ fontSize: 27 }}>{c.name}</h1><div className="dim th" style={{ fontSize: 14, marginTop: 3 }}>{c.nameTh}</div></div></div>
     <div className="grid2">
       <div className="panel">
-        <div className="fx ac jb" style={{ marginBottom: 16 }}><h3 className="panel-t">Required documents</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{c.docs.length} items</span></div>
-        {c.docs.length === 0 ? <div className="empty" style={{ padding: 26 }}><i className="ph ph-files" />No documents required yet.</div> :
-          <div className="chipwrap">{c.docs.map((d) => <div key={d} className="doc-chip"><span className="th">{d}</span><i className="ph ph-x" onClick={() => rpc("toggleCatDoc", { id: c.id, name: d })} /></div>)}</div>}
+        <div className="fx ac jb" style={{ marginBottom: 16 }}><h3 className="panel-t">Required documents</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{c.docsPre.length + c.docsPost.length} items</span></div>
+        <div className="seg" style={{ marginBottom: 14 }}>
+          <button className={phase === "pre" ? "on" : ""} onClick={() => setPhase("pre")}>Pre-reimbursement</button>
+          <button className={phase === "post" ? "on" : ""} onClick={() => setPhase("post")}>Closing</button>
+        </div>
+        {list.length === 0 ? <div className="empty" style={{ padding: 26 }}><i className="ph ph-files" />No documents required yet.</div> :
+          <div className="chipwrap">{list.map((d) => (
+            <div key={d} className={"doc-chip" + (examples[d] ? " has-ex" : "")}>
+              <span className="th">{d}</span>
+              {examples[d]
+                ? <a className="chip-ex" href={examples[d].link} target="_blank" rel="noreferrer" title={examples[d].name || ""}><i className="ph ph-lightbulb" /> Example</a>
+                : <i className="ph ph-lightbulb chip-act" title="Add an example for this document" onClick={() => setExampleDraft({ ...exampleDraft, [d]: exampleDraft[d] === undefined ? "" : undefined })} />}
+              {examples[d] && <i className="ph ph-trash chip-act" title="Remove example" onClick={() => rpc("clearCatDocExample", { id: c.id, name: d })} />}
+              <i className="ph ph-x chip-act" title="Remove document" onClick={() => rpc("toggleCatDoc", { id: c.id, name: d, phase })} />
+            </div>
+          ))}</div>}
+        {Object.keys(exampleDraft).filter((d) => exampleDraft[d] !== undefined && list.includes(d)).map((d) => (
+          <div key={d} className="fx gap8" style={{ marginTop: 10 }}>
+            <input className="input" placeholder={"Drive link for example — " + d} value={exampleDraft[d] || ""} onChange={(e) => setExampleDraft({ ...exampleDraft, [d]: e.target.value })} />
+            <button className="btn btn-ghost btn-sm" onClick={async () => { if (await rpc("setCatDocExample", { id: c.id, name: d, link: exampleDraft[d] })) setExampleDraft({ ...exampleDraft, [d]: undefined }); }}><i className="ph ph-check" /></button>
+          </div>
+        ))}
         <div style={{ marginTop: 20 }}>
           <label className="label">Category note (thresholds, vendor rules, deadlines…)</label>
           <textarea className="input th" style={{ minHeight: 80, resize: "vertical" }} value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => rpc("updateCategoryNotes", { id: c.id, notes: note })} />
@@ -479,17 +519,17 @@ function CatEdit({ data, go, rpc, catId }) {
       </div>
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 6 }}>Add from document menu</h3>
-        <p className="dim" style={{ fontSize: 13, margin: "0 0 14px" }}>Master list maintained by admin. Toggle to add or remove.</p>
+        <p className="dim" style={{ fontSize: 13, margin: "0 0 14px" }}>Master list maintained by admin. Toggle to add or remove — applies to the "{phase === "post" ? "Closing" : "Pre-reimbursement"}" phase selected on the left.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {data.masterDocs.map((m) => (
-            <div key={m.id} className={"doc clickable" + (c.docs.includes(m.name) ? " on" : "")} onClick={() => rpc("toggleCatDoc", { id: c.id, name: m.name })}>
+            <div key={m.id} className={"doc clickable" + (list.includes(m.name) ? " on" : "")} onClick={() => rpc("toggleCatDoc", { id: c.id, name: m.name, phase })}>
               <div className="chk"><i className="ph ph-check" /></div><span className="th" style={{ fontSize: 13.5 }}>{m.name}</span>
             </div>
           ))}
         </div>
         <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
           <input className="input" placeholder="Add a custom document…" value={draft} onChange={(e) => setDraft(e.target.value)} />
-          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await rpc("addCatDoc", { id: c.id, name: draft })) setDraft(""); }}><i className="ph ph-plus" /></button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { if (await rpc("addCatDoc", { id: c.id, name: draft, phase })) setDraft(""); }}><i className="ph ph-plus" /></button>
         </div>
       </div>
     </div>
@@ -767,7 +807,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
           <div className="field"><label className="label">Event date (when the expense actually happened)</label><input className="input" type="date" value={form.eventDate || ""} onChange={set("eventDate")} /></div>
           <div className="field"><label className="label">Description</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.desc || ""} onChange={set("desc")} placeholder="Purpose of this expense…" /></div>
-          {selCat && selCat.docs.length > 0 && <div className="field"><label className="label">Documents required for this category</label><div className="chipwrap">{selCat.docs.map((d) => <span key={d} className="doc-chip th" style={{ padding: "5px 10px", fontSize: 12 }}>{d}</span>)}</div></div>}
+          {selCat && (selCat.docsPre.length + selCat.docsPost.length) > 0 && <div className="field"><label className="label">Documents required for this category</label><div className="chipwrap">{[...selCat.docsPre, ...selCat.docsPost].map((d) => <span key={d} className="doc-chip th" style={{ padding: "5px 10px", fontSize: 12 }}>{d}</span>)}</div></div>}
         </>)}
 
         {modal.type === "newProjection" && (<>

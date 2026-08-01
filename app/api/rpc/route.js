@@ -12,6 +12,7 @@ import { resolveRequestSource } from "@/lib/direct-claim.mjs";
 import { addVendorDocs } from "@/lib/vendor-docs.mjs";
 import { editTxnTx } from "@/lib/txn-edit.mjs";
 import { receiveRevenueTx } from "@/lib/revenue.mjs";
+import { isDocEditable } from "@/lib/doc-phase.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -76,7 +77,10 @@ export async function POST(req) {
             dept: me.dept, requesterId: me.id, requesterName: me.name,
             desc: desc || "", status: "notified",
             eventDate: isNaN(parsedEventDate) ? new Date() : parsedEventDate,
-            docs: cat.docs.map((name) => ({ name, submitted: false, link: null, fileName: null, disc: null })),
+            docs: [
+              ...cat.docsPre.map((name) => ({ name, phase: "pre", submitted: false, link: null, fileName: null, disc: null })),
+              ...cat.docsPost.map((name) => ({ name, phase: "post", submitted: false, link: null, fileName: null, disc: null })),
+            ],
             driveFolder: "https://drive.google.com/drive/folders/PFMS-" + id,
             projectionId: projectionId || null,
             directClaim: source.directClaim,
@@ -214,6 +218,9 @@ export async function POST(req) {
         const docs = r.docs;
         const doc = docs[body.idx];
         if (!doc) return err("Unknown document.");
+        if (!isDocEditable({ phase: doc.phase, status: r.status })) {
+          return err((doc.phase === "post" ? "Closing documents open once funds are disbursed." : "Pre-reimbursement documents are locked after verification."));
+        }
         if (action === "attachDoc") {
           if (!body.link) return err("Paste a Google Drive link.");
           doc.submitted = true;
@@ -282,7 +289,7 @@ export async function POST(req) {
         if (!admin) return err("Forbidden", 403);
         if (!body.name) return err("Enter a category name.");
         await prisma.category.create({
-          data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docs: [], defaultAcctId: body.defaultAcctId || null },
+          data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docsPre: [], docsPost: [], docExamples: {}, defaultAcctId: body.defaultAcctId || null },
         });
         await audit(me, "Created category " + body.name);
         return NextResponse.json({ ok: true });
@@ -309,8 +316,10 @@ export async function POST(req) {
         if (!admin) return err("Forbidden", 403);
         const c = await prisma.category.findUnique({ where: { id: body.id } });
         if (!c) return err("Not found", 404);
-        const docs = c.docs.includes(body.name) ? c.docs.filter((d) => d !== body.name) : [...c.docs, body.name];
-        await prisma.category.update({ where: { id: c.id }, data: { docs } });
+        const field = body.phase === "post" ? "docsPost" : "docsPre";
+        const list = c[field];
+        const docs = list.includes(body.name) ? list.filter((d) => d !== body.name) : [...list, body.name];
+        await prisma.category.update({ where: { id: c.id }, data: { [field]: docs } });
         return NextResponse.json({ ok: true });
       }
       case "addCatDoc": {
@@ -319,10 +328,29 @@ export async function POST(req) {
         if (!c) return err("Not found", 404);
         const name = (body.name || "").trim();
         if (!name) return err("Empty document name.");
-        if (!c.docs.includes(name)) {
-          await prisma.category.update({ where: { id: c.id }, data: { docs: [...c.docs, name] } });
-          await audit(me, 'Added document "' + name + '" to category ' + c.name);
+        const field = body.phase === "post" ? "docsPost" : "docsPre";
+        if (!c[field].includes(name)) {
+          await prisma.category.update({ where: { id: c.id }, data: { [field]: [...c[field], name] } });
+          await audit(me, 'Added ' + (field === "docsPost" ? "closing" : "pre-reimbursement") + ' document "' + name + '" to category ' + c.name);
         }
+        return NextResponse.json({ ok: true });
+      }
+      case "setCatDocExample": {
+        if (!admin) return err("Forbidden", 403);
+        if (!body.link) return err("Paste a Drive link for the example.");
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        const docExamples = { ...c.docExamples, [body.name]: { link: body.link.trim(), name: body.fileName || null } };
+        await prisma.category.update({ where: { id: c.id }, data: { docExamples } });
+        return NextResponse.json({ ok: true });
+      }
+      case "clearCatDocExample": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        const docExamples = { ...c.docExamples };
+        delete docExamples[body.name];
+        await prisma.category.update({ where: { id: c.id }, data: { docExamples } });
         return NextResponse.json({ ok: true });
       }
       case "addMasterDoc": {
