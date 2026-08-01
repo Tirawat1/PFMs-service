@@ -233,6 +233,7 @@ export async function POST(req) {
               facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
             });
             if (!settle.conflict && settle.refund > 0) {
+              await prisma.request.update({ where: { id: r.id }, data: { refundAmount: settle.refund } });
               await audit(me, "Returned unspent advance " + fmt(settle.refund) + " for " + r.id + " to Faculty account");
             }
           }

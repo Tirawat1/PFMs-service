@@ -350,6 +350,8 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
   const isRequester = r.requesterId === me.id;
   const canOfficer = admin || can("verify");
   const openDisc = r.docs.filter((d) => d.disc && d.disc.open).length;
+  const proj = r.projectionId ? (data.projections || []).find((p) => p.id === r.projectionId) : null;
+  const depositStream = r.depositStreamId ? (data.streams || []).find((s) => s.id === r.depositStreamId) : null;
 
   return (<>
     <div className="fx ac gap12" style={{ flexWrap: "wrap" }}>
@@ -464,6 +466,17 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
             <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ vendor: r.vendor || "", amount: String(r.amount), link: "", note: "" }); setModal({ type: "issuePO", reqId: r.id }); }}><i className="ph ph-file-text" /> {r.po ? "Re-issue PO" : "Issue PO"}</button>
             <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ link: "", ref: "", date: new Date().toISOString().slice(0, 10), note: "" }); setModal({ type: "proofPay", reqId: r.id }); }}><i className="ph ph-receipt" /> Attach proof of payment</button>
             {!r.depositPaid && r.status !== "closed" && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ amount: "", streamId: data.streams?.[0]?.id || "" }); setModal({ type: "payDeposit", reqId: r.id }); }}><i className="ph ph-coins" /> Pay deposit</button>}
+          </div>
+        )}
+        {proj && (
+          <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 9 }}><i className="ph ph-chart-line-up" /> Advance — {proj.id}</div>
+            <div className="fx" style={{ gap: 16, flexWrap: "wrap" }}>
+              <div><div className="dim" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em" }}>PROJECTED</div><div className="mono" style={{ fontWeight: 800, fontSize: 15 }}>{fmt(proj.amount)}</div></div>
+              <div><div className="dim" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em" }}>ACTUAL PAID</div><div className="mono" style={{ fontWeight: 800, fontSize: 15 }}>{fmt(r.amount)}</div></div>
+              {r.depositPaid && <div><div className="dim" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em" }}>DEPOSIT PAID</div><div className="mono" style={{ fontWeight: 800, fontSize: 15 }}>{fmt(r.depositAmount)}</div>{depositStream && <div className="dim" style={{ fontSize: 11 }}>{depositStream.name}</div>}</div>}
+              {r.refundAmount > 0 && <div><div className="dim" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em" }}>RETURNED TO FACULTY</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 15 }}>{fmt(r.refundAmount)}</div></div>}
+            </div>
           </div>
         )}
         {r.po && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-file-text" /> Purchase order {r.po.number}</div><div style={{ fontSize: 13 }}>{r.po.vendor} — {fmt(r.po.amount)}</div>{r.po.link && <a href={r.po.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View PO ↗</a>}</div>}

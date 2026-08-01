@@ -112,6 +112,7 @@ model Request {
   depositAmount     Float?
   depositPaid       Boolean  @default(false)
   depositStreamId   String?
+  refundAmount      Float    @default(0)
   paidVia           String   @default("finance")
   po                Json?
   payProof          Json?
