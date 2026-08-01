@@ -45,6 +45,7 @@ model Category {
   defaultAcctId String?
   active        Boolean @default(true) // soft-close, never hard-delete — existing requests still reference categoryId
   allowDirect   Boolean @default(false) // may be reimbursed without a projected-expense advance
+  vendorRequired Boolean @default(false) // this category always involves an external supplier — vendor name is mandatory at submission
   defaultPaidVia String @default("finance") // finance | purchasing | psat — who typically processes this category's payments
   approverRole   String @default("faculty_finance") // faculty_finance | faculty_purchasing — which approver track verifies this category
 }

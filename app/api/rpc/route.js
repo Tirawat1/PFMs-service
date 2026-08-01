@@ -14,6 +14,7 @@ import { editTxnTx } from "@/lib/txn-edit.mjs";
 import { receiveRevenueTx } from "@/lib/revenue.mjs";
 import { isDocEditable } from "@/lib/doc-phase.mjs";
 import { canApproveCategory } from "@/lib/payment-routing.mjs";
+import { validateVendorAtSubmission } from "@/lib/vendor-required.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
 
 const err = (msg, status = 400) => NextResponse.json({ error: msg }, { status });
@@ -56,10 +57,12 @@ export async function POST(req) {
       // ---------- requests ----------
       case "createRequest": {
         if (!can(me, "create")) return err("Forbidden", 403);
-        const { title, categoryId, amount, desc, eventDate, projectionId, paidVia } = body;
+        const { title, categoryId, amount, desc, eventDate, projectionId, paidVia, vendor } = body;
         if (!title || !categoryId) return err("Fill title and category.");
         const cat = await prisma.category.findUnique({ where: { id: categoryId } });
         if (!cat || !cat.active) return err("Unknown category.");
+        const vendorCheck = validateVendorAtSubmission({ categoryVendorRequired: cat.vendorRequired, vendor });
+        if (vendorCheck.error) return err(vendorCheck.error);
         let proj = null;
         if (projectionId) proj = await prisma.projection.findUnique({ where: { id: projectionId } });
         const source = resolveRequestSource({
@@ -86,6 +89,7 @@ export async function POST(req) {
             projectionId: projectionId || null,
             directClaim: source.directClaim,
             paidVia: paidVia || cat.defaultPaidVia,
+            vendor: (vendor || "").trim(),
           },
         });
         if (proj) {
@@ -148,6 +152,14 @@ export async function POST(req) {
         await prisma.category.update({ where: { id: c.id }, data: { allowDirect: !c.allowDirect } });
         await audit(me, (c.allowDirect ? "Disabled" : "Enabled") + " direct reimbursement for category " + c.name);
         return NextResponse.json({ ok: true, allowDirect: !c.allowDirect });
+      }
+      case "toggleCategoryVendorRequired": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        await prisma.category.update({ where: { id: c.id }, data: { vendorRequired: !c.vendorRequired } });
+        await audit(me, (c.vendorRequired ? "Disabled" : "Enabled") + " vendor requirement for category " + c.name);
+        return NextResponse.json({ ok: true, vendorRequired: !c.vendorRequired });
       }
       // Requester (or admin) answers whether the supplier is an already-registered vendor
       case "reportVendor": {

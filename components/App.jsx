@@ -534,6 +534,10 @@ function CatEdit({ data, go, rpc, catId }) {
             <option value="faculty_purchasing">Faculty Purchasing</option>
           </select>
         </div>
+        <div className="fx ac jb" style={{ marginTop: 16 }}>
+          <div><div style={{ fontWeight: 700, fontSize: 14 }}>Vendor required</div><div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>This category always involves an external supplier — vendor name must be given at submission.</div></div>
+          <div className={"switch" + (c.vendorRequired ? " on" : "")} onClick={() => rpc("toggleCategoryVendorRequired", { id: c.id })} />
+        </div>
       </div>
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 6 }}>Add from document menu</h3>
@@ -837,6 +841,9 @@ function Modal({ ctx, modal, form, setForm, close }) {
             <option value="psat">PSAT</option>
           </select></div>
           <div className="field"><label className="label">Description</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.desc || ""} onChange={set("desc")} placeholder="Purpose of this expense…" /></div>
+          {selCat && selCat.vendorRequired && (
+            <div className="field"><label className="label">Vendor / supplier name (required for this category)</label><input className="input" value={form.vendor || ""} onChange={set("vendor")} placeholder="e.g. Acme Catering Co." /></div>
+          )}
           {selCat && (selCat.docsPre.length + selCat.docsPost.length) > 0 && <div className="field"><label className="label">Documents required for this category</label><div className="chipwrap">{[...selCat.docsPre, ...selCat.docsPost].map((d) => <span key={d} className="doc-chip th" style={{ padding: "5px 10px", fontSize: 12 }}>{d}</span>)}</div></div>}
         </>)}
 
@@ -934,7 +941,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
         </>)}
 
-        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
+        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim())) || (modal.type === "newRequest" && selCat?.vendorRequired && !(form.vendor || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
       </div>
     </div>
   );
