@@ -114,6 +114,11 @@ model Request {
   depositStreamId   String?
   refundAmount      Float    @default(0)
   paidVia           String   @default("finance")
+  payRoute          String   @default("direct") // direct | advance | selfpay
+  payee             String   @default("")
+  payNote           String   @default("")
+  actualAmount      Float?
+  streamId          String? // purse that funded the disbursement, when acctId has purses
   po                Json?
   payProof          Json?
   createdAt         DateTime @default(now())

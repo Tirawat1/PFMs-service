@@ -6,7 +6,7 @@ import { sendMailToUser } from "@/lib/mail";
 import { ORDER, STATUS, ADV_PERM, ADV_LABELS } from "@/lib/constants";
 import { seedDemo, ROLES } from "@/lib/seed-data.mjs";
 import { canManageRequestDocs } from "@/lib/permissions.mjs";
-import { advanceRequestTx, resolveDisburseAccount } from "@/lib/requests.mjs";
+import { advanceRequestTx, resolveDisburseAccount, validateDisbursement } from "@/lib/requests.mjs";
 import { approveProjectionTx, settleProjectionTx } from "@/lib/projections.mjs";
 import { resolveRequestSource } from "@/lib/direct-claim.mjs";
 import { addVendorDocs } from "@/lib/vendor-docs.mjs";
@@ -198,7 +198,7 @@ export async function POST(req) {
           }
         }
 
-        let acctId, proofLink, acctName;
+        let acctId, proofLink, acctName, route, payee, payNote, actualAmount, streamId;
         if (next === "disbursed") {
           const cat = await prisma.category.findUnique({ where: { id: r.categoryId } });
           const candidateId = body.acctId || cat?.defaultAcctId;
@@ -210,26 +210,43 @@ export async function POST(req) {
           if (resolved.error) return err(resolved.error);
           ({ acctId, proofLink } = resolved);
           acctName = account?.name || acctId;
+
+          const validated = validateDisbursement({
+            route: body.route || "direct", payee: body.payee, payNote: body.payNote,
+            actualAmount: body.actualAmount, requestAmount: r.amount,
+          });
+          if (validated.error) return err(validated.error);
+          route = body.route || "direct";
+          payee = body.payee || "";
+          payNote = body.payNote || "";
+          actualAmount = validated.actual;
         }
 
         let disburseAmount = r.amount;
         if (next === "disbursed") {
-          const remaining = remainingAfterDeposit({ requestAmount: r.amount, depositAmount: r.depositAmount, depositPaid: r.depositPaid });
+          const remaining = remainingAfterDeposit({ requestAmount: actualAmount, depositAmount: r.depositAmount, depositPaid: r.depositPaid });
           if (remaining.error) return err(remaining.error);
           disburseAmount = remaining.amount;
+
+          if (body.streamId) {
+            const stream = await prisma.stream.findUnique({ where: { id: body.streamId } });
+            if (!stream || !stream.active || stream.acctId !== acctId) return err("Selected purse is not available for this account.");
+            if (stream.balance < disburseAmount) return err("Insufficient balance in this purse.");
+            streamId = stream.id;
+          }
         }
 
         const result = await advanceRequestTx(prisma, {
           id: r.id, currentStatus: r.status, nextStatus: next,
-          isDisbursement: next === "disbursed", amount: r.depositPaid ? disburseAmount : r.amount, title: r.title,
-          acctId, proofLink,
+          isDisbursement: next === "disbursed", amount: disburseAmount, title: r.title,
+          acctId, proofLink, streamId, payRoute: route, payee, payNote, actualAmount,
         });
         if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
         if (next === "disbursed" && r.projectionId) {
           const proj = await prisma.projection.findUnique({ where: { id: r.projectionId } });
           if (proj && proj.status === "linked") {
             const settle = await settleProjectionTx(prisma, {
-              id: proj.id, currentStatus: "linked", advancedAmount: proj.amount, actualAmount: r.amount,
+              id: proj.id, currentStatus: "linked", advancedAmount: proj.amount, actualAmount,
               facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
             });
             if (!settle.conflict && settle.refund > 0) {
@@ -238,8 +255,8 @@ export async function POST(req) {
             }
           }
         }
-        const label = STATUS[next].label + (next === "disbursed" ? " (" + fmt(r.amount) + " transferred)" : "");
-        await audit(me, "Advanced " + r.id + " to " + STATUS[next].label + (next === "disbursed" ? " from account " + acctName : ""));
+        const label = STATUS[next].label + (next === "disbursed" ? " (" + fmt(actualAmount) + " transferred)" : "");
+        await audit(me, "Advanced " + r.id + " to " + STATUS[next].label + (next === "disbursed" ? " from account " + acctName + " via " + route + (route === "selfpay" ? " to " + payee : "") : ""));
         await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — " + label + ".", next);
         await notifyPerm("disburse", r.id + " — " + label + ".", next, me.id);
         return NextResponse.json({ ok: true });

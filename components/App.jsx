@@ -457,7 +457,8 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         {r.acctId && (
           <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
             <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-bank" /> Disbursed from</div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>{data.accounts.find((a) => a.id === r.acctId)?.name || r.acctId}</div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{data.accounts.find((a) => a.id === r.acctId)?.name || r.acctId}{r.streamId && <span className="dim" style={{ fontWeight: 500 }}> — {data.streams?.find((s) => s.id === r.streamId)?.name || r.streamId}</span>}</div>
+            <div className="dim" style={{ fontSize: 12.5 }}>{{ direct: "Direct to supplier", advance: "Settled from advance", selfpay: "Self-pay" + (r.payee ? " — " + r.payee : "") }[r.payRoute] || r.payRoute}{r.actualAmount != null && r.actualAmount !== r.amount && " · Actual paid " + fmt(r.actualAmount)}</div>
             {r.disburseProofLink && <a href={r.disburseProofLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: "#7cb3ff" }}>View transfer proof ↗</a>}
           </div>
         )}
@@ -483,7 +484,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         {r.payProof && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-receipt" /> Proof of payment</div><div style={{ fontSize: 13 }}>{r.payProof.ref} — {r.payProof.date}</div><a href={r.payProof.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View slip ↗</a></div>}
         {r.depositPaid && <div className="drive-banner"><i className="ph ph-coins" /><span>Deposit of {fmt(r.depositAmount)} already paid — only the remaining balance will be deducted at disbursement.</span></div>}
         {canAdv && nextKey !== "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
-        {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "" }); setModal({ type: "disburse", reqId: r.id, depositPaid: r.depositPaid, depositAmount: r.depositAmount }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
+        {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "", route: "direct", payee: "", payNote: "", actualAmount: String(r.amount), streamId: "" }); setModal({ type: "disburse", reqId: r.id, depositPaid: r.depositPaid, depositAmount: r.depositAmount, reqAmount: r.amount }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {!canAdv && nextKey && <div className="dim" style={{ fontSize: 12.5, textAlign: "center", padding: 10, border: "1px dashed var(--line2)", borderRadius: 11, marginTop: "auto" }}>Next step ({ADV_LABELS[nextKey]}) is handled by another role.</div>}
         {(admin || can("verify")) && ["docs_submitted", "verified"].includes(r.status) && <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => { setForm({ reason: "" }); setModal({ type: "correction", reqId: r.id }); }}><i className="ph ph-arrow-u-up-left" /> Return for correction</button>}
       </div>
@@ -858,7 +859,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "attach") ok = await rpc("attachDoc", { id: modal.reqId, idx: modal.idx, link: form.link, fileName: form.fileName }, "Document submitted.");
     else if (modal.type === "flagDisc") ok = await rpc("flagDiscrepancy", { id: modal.reqId, idx: modal.idx, note: form.note }, "Discrepancy flagged — requester notified.");
     else if (modal.type === "markFixed") ok = await rpc("markFixed", { id: modal.reqId, idx: modal.idx, note: form.note }, "Officer notified of the change.");
-    else if (modal.type === "disburse") ok = await rpc("advanceRequest", { id: modal.reqId, acctId: form.acctId, proofLink: form.proofLink }, "Funds disbursed.");
+    else if (modal.type === "disburse") ok = await rpc("advanceRequest", { id: modal.reqId, acctId: form.acctId, proofLink: form.proofLink, route: form.route, payee: form.payee, payNote: form.payNote, actualAmount: form.actualAmount, streamId: form.streamId || undefined }, "Funds disbursed.");
     else if (modal.type === "newAccount") ok = await rpc("createAccount", form, "Account created.");
     else if (modal.type === "addFunds") ok = await rpc("addFunds", { acctId: modal.acctId, amount: form.amount, desc: form.desc }, "Funds added.");
     else if (modal.type === "editTxn") ok = await rpc("editTransaction", { id: modal.txnId, amount: form.amount, reason: form.reason }, "Transaction corrected.");
@@ -1012,10 +1013,27 @@ function Modal({ ctx, modal, form, setForm, close }) {
 
         {modal.type === "disburse" && (<>
           {modal.depositPaid && <div className="drive-banner" style={{ marginBottom: 16 }}><i className="ph ph-coins" /><span>Deposit of {fmt(modal.depositAmount)} already paid — only the remaining balance will be deducted now.</span></div>}
+          <div className="field"><label className="label">Payment route</label><select className="input" value={form.route || "direct"} onChange={set("route")}>
+            <option value="direct">Direct to supplier</option>
+            <option value="advance">Settled from advance</option>
+            <option value="selfpay">Self-pay — transfer to a department member</option>
+          </select></div>
+          {form.route === "selfpay" && (<>
+            <div className="field"><label className="label">Payee</label><input className="input" value={form.payee || ""} onChange={set("payee")} placeholder="Name of the department member receiving funds" /></div>
+            <div className="field"><label className="label">Note</label><textarea className="input" style={{ minHeight: 60, resize: "vertical" }} value={form.payNote || ""} onChange={set("payNote")} placeholder="Required — explain the self-pay arrangement" /></div>
+          </>)}
           <div className="field"><label className="label">Source account</label><select className="input" value={form.acctId || ""} onChange={set("acctId")}>
             <option value="" disabled>Select an account…</option>
             {data.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select></div>
+          {(data.streams || []).filter((s) => s.active && s.acctId === form.acctId).length > 0 && (
+            <div className="field"><label className="label">Purse</label><select className="input" value={form.streamId || ""} onChange={set("streamId")}>
+              <option value="">No purse — debit account directly</option>
+              {(data.streams || []).filter((s) => s.active && s.acctId === form.acctId).map((s) => <option key={s.id} value={s.id}>{s.name} ({fmt(s.balance)})</option>)}
+            </select></div>
+          )}
+          <div className="field"><label className="label">Actual amount paid</label><input className="input mono" type="number" value={form.actualAmount ?? ""} onChange={set("actualAmount")} placeholder={String(modal.reqAmount || 0)} /></div>
+          <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Requested {fmt(modal.reqAmount)}. If the actual invoice came in lower, enter the lower figure — the difference is returned to the Faculty account.</div>
           <div className="field"><label className="label">Transfer proof link</label><input className="input" value={form.proofLink || ""} onChange={set("proofLink")} placeholder="https://… (bank transfer slip / statement)" /></div>
           <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Funds will be deducted from this account immediately.</div>
         </>)}
@@ -1031,7 +1049,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
         </>)}
 
-        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim())) || (modal.type === "newRequest" && selCat?.vendorRequired && !(form.vendor || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
+        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || (modal.type === "newRequest" && selCat?.vendorRequired && !(form.vendor || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
       </div>
     </div>
   );
