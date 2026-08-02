@@ -264,23 +264,44 @@ function DeptDashboard({ me, data, can, catName, go, setModal, setForm }) {
 }
 
 function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setForm, setReqFilter }) {
+  const [dept, setDept] = useState("");
   const accts = data.accounts;
   const activeAccts = accts.filter((a) => a.active);
   const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
 
   const inflow = data.txns.filter((t) => t.type === "in").reduce((s, t) => s + t.amount, 0);
   const outflow = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
-  const pending = data.requests.filter((r) => r.status !== "closed");
+  const depts = [...new Set(data.requests.map((r) => r.dept).filter(Boolean))].sort();
+  const scoped = dept ? data.requests.filter((r) => r.dept === dept) : data.requests;
+  const pending = scoped.filter((r) => r.status !== "closed");
   const showBanks = accts.length > 0;
   const fac = accts.find((a) => a.id === "faculty"), prj = accts.find((a) => a.id === "project");
   const io = (id, type) => data.txns.filter((t) => t.acctId === id && t.type === type).reduce((s, t) => s + t.amount, 0);
   const spend = {};
-  data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { spend[r.categoryId] = (spend[r.categoryId] || 0) + r.amount; });
+  scoped.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { spend[r.categoryId] = (spend[r.categoryId] || 0) + r.amount; });
   const palette = ["#f0378a", "#a855f7", "#3fd8a4", "#f5b544", "#60a5fa", "#e11d48", "#22d3ee"];
   const ents = Object.entries(spend).map(([cid, amt]) => ({ label: (data.categories.find((c) => c.id === cid) && catName(data.categories.find((c) => c.id === cid))) || cid, amount: amt })).sort((a, b) => b.amount - a.amount);
   const totalSpend = ents.reduce((s, e) => s + e.amount, 0) || 1;
   const purses = (data.streams || []).filter((s) => s.active);
   const pursesTotal = purses.reduce((s, p) => s + p.balance, 0);
+
+  const committed = pending.reduce((s, r) => s + r.amount, 0);
+  const spent = data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).reduce((s, r) => s + r.amount, 0);
+  const coverageTotal = totalBal + committed + spent || 1;
+
+  const deptSpend = {};
+  data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { deptSpend[r.dept] = (deptSpend[r.dept] || 0) + r.amount; });
+  const deptEnts = Object.entries(deptSpend).map(([d, amt]) => ({ dept: d, amount: amt, count: data.requests.filter((r) => r.dept === d).length })).sort((a, b) => b.amount - a.amount);
+  const deptTotal = deptEnts.reduce((s, e) => s + e.amount, 0) || 1;
+
+  const monthKey = (ts) => new Date(ts).toISOString().slice(0, 7);
+  const months = [];
+  for (let i = 5; i >= 0; i--) { const d = new Date(); d.setMonth(d.getMonth() - i); months.push(d.toISOString().slice(0, 7)); }
+  const monthly = {};
+  data.txns.filter((t) => t.type === "out").forEach((t) => { const k = monthKey(t.date); monthly[k] = (monthly[k] || 0) + t.amount; });
+  const monthlyMax = Math.max(1, ...months.map((m) => monthly[m] || 0));
+
+  const recentActivity = (data.audit || []).slice(0, 8);
 
   const bank = (a, proj) => (
     <div className={"bankcard" + (proj ? " proj" : "")} onClick={() => go("accounts")}>
@@ -293,7 +314,10 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Financial <span className="gradt">Overview</span></h1><p className="sub">Money across accounts, reimbursement progress, and disbursement activity.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
+      <div className="fx ac gap12">
+        {depts.length > 1 && <select className="input" style={{ width: "auto" }} value={dept} onChange={(e) => setDept(e.target.value)}><option value="">All departments</option>{depts.map((d) => <option key={d} value={d}>{d}</option>)}</select>}
+        {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
+      </div>
     </div>
     {showBanks && fac && prj && (
       <div className="bankgrid">
@@ -324,10 +348,25 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
         </div>
       </div>
     )}
+    {showBanks && (
+      <div className="panel">
+        <h3 className="panel-t" style={{ marginBottom: 12 }}>Budget coverage</h3>
+        <div style={{ display: "flex", height: 10, borderRadius: 6, overflow: "hidden", marginBottom: 14 }}>
+          <div style={{ width: (totalBal / coverageTotal) * 100 + "%", background: "#3fd8a4" }} title="Available" />
+          <div style={{ width: (committed / coverageTotal) * 100 + "%", background: "#f5b544" }} title="Committed" />
+          <div style={{ width: (spent / coverageTotal) * 100 + "%", background: "#e11d48" }} title="Spent" />
+        </div>
+        <div className="fx gap16" style={{ flexWrap: "wrap" }}>
+          <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "#3fd8a4" }} /><span className="th">Available</span><span className="mono dim">{fmt(totalBal)}</span></div>
+          <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "#f5b544" }} /><span className="th">Committed (pending)</span><span className="mono dim">{fmt(committed)}</span></div>
+          <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "#e11d48" }} /><span className="th">Spent</span><span className="mono dim">{fmt(spent)}</span></div>
+        </div>
+      </div>
+    )}
     <div className="grid2">
       <div className="panel">
-        <div className="fx ac jb" style={{ marginBottom: 16 }}><h3 className="panel-t">Reimbursement pipeline</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{data.requests.length} requests</span></div>
-        <div className="pipe">{ORDER.map((k) => <div key={k} className="pipe-cell" style={{ cursor: "pointer" }} onClick={() => { setReqFilter(k); go("requests"); }}><div className="pipe-n" style={{ color: k === "disbursed" ? "var(--accent2)" : k === "closed" ? "var(--mut)" : "var(--txt)" }}>{data.requests.filter((r) => r.status === k).length}</div><div className="pipe-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div>
+        <div className="fx ac jb" style={{ marginBottom: 16 }}><h3 className="panel-t">Reimbursement pipeline</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{scoped.length} requests</span></div>
+        <div className="pipe">{ORDER.map((k) => <div key={k} className="pipe-cell" style={{ cursor: "pointer" }} onClick={() => { setReqFilter(k); go("requests"); }}><div className="pipe-n" style={{ color: k === "disbursed" ? "var(--accent2)" : k === "closed" ? "var(--mut)" : "var(--txt)" }}>{scoped.filter((r) => r.status === k).length}</div><div className="pipe-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div>
       </div>
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 4 }}>Spending by category</h3>
@@ -343,6 +382,31 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
           ))}
       </div>
     </div>
+    <div className="grid2">
+      <div className="panel">
+        <h3 className="panel-t" style={{ marginBottom: 4 }}>Spending by department</h3>
+        <p className="dim" style={{ fontSize: 12.5, margin: "0 0 14px" }}>Disbursed & completed reimbursements</p>
+        {deptEnts.length === 0 ? <div className="empty" style={{ padding: 30 }}><i className="ph ph-buildings" />No disbursed spending yet.</div> : deptEnts.map((e) => (
+          <div key={e.dept} style={{ padding: "8px 0" }}>
+            <div className="fx ac jb" style={{ fontSize: 13, marginBottom: 4 }}><span className="th">{e.dept}</span><span className="mono" style={{ fontWeight: 700 }}>{fmt(e.amount)}</span></div>
+            <div style={{ height: 6, borderRadius: 4, background: "var(--line2)", overflow: "hidden" }}><div style={{ width: (e.amount / deptTotal) * 100 + "%", height: "100%", background: "var(--accent2)" }} /></div>
+          </div>
+        ))}
+      </div>
+      <div className="panel">
+        <h3 className="panel-t" style={{ marginBottom: 4 }}>Monthly disbursement</h3>
+        <p className="dim" style={{ fontSize: 12.5, margin: "0 0 14px" }}>Outflow across all accounts, last 6 months</p>
+        <div className="fx" style={{ alignItems: "flex-end", gap: 10, height: 110 }}>
+          {months.map((m) => (
+            <div key={m} className="fx" style={{ flex: 1, flexDirection: "column", alignItems: "center", gap: 6 }}>
+              <div className="mono dim" style={{ fontSize: 10.5 }}>{(monthly[m] || 0) > 0 ? fmt(monthly[m]) : ""}</div>
+              <div style={{ width: "100%", height: Math.max(3, ((monthly[m] || 0) / monthlyMax) * 80), borderRadius: 4, background: "var(--accent2)" }} />
+              <div className="dim" style={{ fontSize: 10.5 }}>{m.slice(5)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
     {(data.txns.length > 0) && (
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 8 }}>Recent transactions</h3>
@@ -350,6 +414,18 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
           const ref = parseNotificationRef(t.desc);
           return <div key={t.id} onClick={ref && ref.kind === "request" ? () => go("detail", { detailId: ref.id }) : undefined} style={ref && ref.kind === "request" ? { cursor: "pointer" } : undefined}><TxnRow t={t} accounts={data.accounts} /></div>;
         })}
+      </div>
+    )}
+    {admin && recentActivity.length > 0 && (
+      <div className="panel">
+        <h3 className="panel-t" style={{ marginBottom: 8 }}>Activity feed</h3>
+        {recentActivity.map((a) => (
+          <div key={a.id} className="fx ac gap10" style={{ padding: "9px 0", borderTop: "1px solid var(--line)" }}>
+            <span className="tag">{auditCategory(a.action)}</span>
+            <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.action}</div><div className="dim" style={{ fontSize: 11 }}>{a.user} · {a.role}</div></div>
+            <div className="dim mono" style={{ fontSize: 11 }}>{fmtTime(a.ts)}</div>
+          </div>
+        ))}
       </div>
     )}
   </>);
