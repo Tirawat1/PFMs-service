@@ -119,6 +119,7 @@ model Request {
   payNote           String   @default("")
   actualAmount      Float?
   streamId          String? // purse that funded the disbursement, when acctId has purses
+  bank              Json? // {holder, bank, acctNo, branch, promptpay, note, by, byRole, ts} — receiving account for reimbursement
   po                Json?
   payProof          Json?
   createdAt         DateTime @default(now())

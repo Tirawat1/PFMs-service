@@ -454,6 +454,23 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         {r.vendorExists != null && (
           <div className="dim" style={{ fontSize: 12.5 }}><i className="ph ph-storefront" /> {r.vendorExists ? "Existing registered vendor" : "New vendor — registration documents added to the checklist"}</div>
         )}
+        {r.bank && (
+          <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-bank" /> Receiving account</div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{r.bank.holder} — {r.bank.bank} {r.bank.acctNo}{r.bank.branch ? " (" + r.bank.branch + ")" : ""}</div>
+            {r.bank.promptpay && <div className="dim" style={{ fontSize: 12.5 }}>PromptPay: {r.bank.promptpay}</div>}
+            {r.bank.note && <div className="dim" style={{ fontSize: 12.5 }}>{r.bank.note}</div>}
+          </div>
+        )}
+        {(isRequester || admin) && r.status !== "closed" && (
+          <div className="fx gap8" style={{ flexWrap: "wrap" }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ title: r.title, categoryId: r.categoryId, amount: String(r.amount), eventDate: new Date(r.eventDate).toISOString().slice(0, 10), paidVia: r.paidVia, vendor: r.vendor || "", desc: r.desc || "" }); setModal({ type: "editRequest", reqId: r.id }); }}><i className="ph ph-pencil-simple" /> Edit request</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ holder: r.bank?.holder || "", bank: r.bank?.bank || "", acctNo: r.bank?.acctNo || "", branch: r.bank?.branch || "", promptpay: r.bank?.promptpay || "", note: r.bank?.note || "" }); setModal({ type: "bankInfo", reqId: r.id }); }}><i className="ph ph-bank" /> {r.bank ? "Edit bank info" : "Add bank info"}</button>
+          </div>
+        )}
+        {(admin || can("disburse")) && !r.bank && r.status !== "closed" && (
+          <button className="btn btn-ghost btn-sm" onClick={() => rpc("requestBankInfo", { id: r.id }, "Requester notified.")}><i className="ph ph-bell" /> Request bank info</button>
+        )}
         {r.acctId && (
           <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
             <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-bank" /> Disbursed from</div>
@@ -484,7 +501,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         {r.payProof && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-receipt" /> Proof of payment</div><div style={{ fontSize: 13 }}>{r.payProof.ref} — {r.payProof.date}</div><a href={r.payProof.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View slip ↗</a></div>}
         {r.depositPaid && <div className="drive-banner"><i className="ph ph-coins" /><span>Deposit of {fmt(r.depositAmount)} already paid — only the remaining balance will be deducted at disbursement.</span></div>}
         {canAdv && nextKey !== "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
-        {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "", route: "direct", payee: "", payNote: "", actualAmount: String(r.amount), streamId: "" }); setModal({ type: "disburse", reqId: r.id, depositPaid: r.depositPaid, depositAmount: r.depositAmount, reqAmount: r.amount }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
+        {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "", route: "direct", payee: "", payNote: "", actualAmount: String(r.amount), streamId: "" }); setModal({ type: "disburse", reqId: r.id, depositPaid: r.depositPaid, depositAmount: r.depositAmount, reqAmount: r.amount, bank: r.bank }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {!canAdv && nextKey && <div className="dim" style={{ fontSize: 12.5, textAlign: "center", padding: 10, border: "1px dashed var(--line2)", borderRadius: 11, marginTop: "auto" }}>Next step ({ADV_LABELS[nextKey]}) is handled by another role.</div>}
         {(admin || can("verify")) && ["docs_submitted", "verified"].includes(r.status) && <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => { setForm({ reason: "" }); setModal({ type: "correction", reqId: r.id }); }}><i className="ph ph-arrow-u-up-left" /> Return for correction</button>}
       </div>
@@ -846,12 +863,14 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction" };
+  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
     let ok = false;
     if (modal.type === "newRequest") ok = await rpc("createRequest", form, "Reimbursement submitted.");
+    else if (modal.type === "editRequest") ok = await rpc("editRequest", { ...form, id: modal.reqId }, "Request updated.");
+    else if (modal.type === "bankInfo") ok = await rpc("setBankInfo", { id: modal.reqId, holder: form.holder, bank: form.bank, acctNo: form.acctNo, branch: form.branch, promptpay: form.promptpay, note: form.note }, "Bank account details saved.");
     else if (modal.type === "newProjection") ok = await rpc("createProjection", form, "Projection submitted.");
     else if (modal.type === "newUser") ok = await rpc("createUser", form, "User added.");
     else if (modal.type === "newRole") ok = await rpc("createRole", form, "Role created.");
@@ -878,7 +897,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="fx ac jb" style={{ marginBottom: 20 }}><h3 className="dsp" style={{ fontSize: 21, fontWeight: 800, margin: 0 }}>{titles[modal.type]}</h3><div className="iconbtn" onClick={close}><i className="ph ph-x" /></div></div>
 
-        {modal.type === "newRequest" && (<>
+        {(modal.type === "newRequest" || modal.type === "editRequest") && (<>
           <div className="field"><label className="label">Title</label><input className="input" value={form.title || ""} onChange={set("title")} placeholder="e.g. Snacks for opening ceremony" /></div>
           <div className="field"><label className="label">Expense category</label><select className="input" value={form.categoryId || ""} onChange={set("categoryId")}>{data.categories.filter((c) => c.active !== false).map((c) => <option key={c.id} value={c.id}>{catName(c)}</option>)}</select></div>
           {(data.projections || []).some((p) => p.status === "advanced") && (
@@ -1013,6 +1032,16 @@ function Modal({ ctx, modal, form, setForm, close }) {
 
         {modal.type === "disburse" && (<>
           {modal.depositPaid && <div className="drive-banner" style={{ marginBottom: 16 }}><i className="ph ph-coins" /><span>Deposit of {fmt(modal.depositAmount)} already paid — only the remaining balance will be deducted now.</span></div>}
+          {modal.bank ? (
+            <div style={{ padding: "11px 13px", borderRadius: 10, background: "var(--panel2)", border: "1px solid var(--line2)", marginBottom: 16, fontSize: 13 }}>
+              <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 5 }}><i className="ph ph-bank" /> Receiving account</div>
+              <div>{modal.bank.holder} — {modal.bank.bank} {modal.bank.acctNo}{modal.bank.branch ? " (" + modal.bank.branch + ")" : ""}</div>
+              {modal.bank.promptpay && <div className="dim">PromptPay: {modal.bank.promptpay}</div>}
+              {modal.bank.note && <div className="dim">{modal.bank.note}</div>}
+            </div>
+          ) : (
+            <div className="drive-banner" style={{ marginBottom: 16 }}><i className="ph ph-warning" /><span>No receiving bank account on file — confirm details with the department or record them in the proof note.</span></div>
+          )}
           <div className="field"><label className="label">Payment route</label><select className="input" value={form.route || "direct"} onChange={set("route")}>
             <option value="direct">Direct to supplier</option>
             <option value="advance">Settled from advance</option>
@@ -1038,6 +1067,15 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Funds will be deducted from this account immediately.</div>
         </>)}
 
+        {modal.type === "bankInfo" && (<>
+          <div className="field"><label className="label">Account holder</label><input className="input" value={form.holder || ""} onChange={set("holder")} placeholder="Name on the receiving account" /></div>
+          <div className="field"><label className="label">Bank</label><input className="input" value={form.bank || ""} onChange={set("bank")} placeholder="e.g. Kasikornbank" /></div>
+          <div className="field"><label className="label">Account number</label><input className="input" value={form.acctNo || ""} onChange={set("acctNo")} placeholder="xxx-x-xxxxx-x" /></div>
+          <div className="field"><label className="label">Branch (optional)</label><input className="input" value={form.branch || ""} onChange={set("branch")} /></div>
+          <div className="field"><label className="label">PromptPay (optional)</label><input className="input" value={form.promptpay || ""} onChange={set("promptpay")} /></div>
+          <div className="field"><label className="label">Note (optional)</label><input className="input" value={form.note || ""} onChange={set("note")} /></div>
+        </>)}
+
         {modal.type === "newAccount" && (<>
           <div className="field"><label className="label">Account name (EN)</label><input className="input" value={form.name || ""} onChange={set("name")} placeholder="e.g. Department Petty Cash" /></div>
           <div className="field"><label className="label">ชื่อบัญชี (TH)</label><input className="input th" value={form.nameTh || ""} onChange={set("nameTh")} /></div>
@@ -1049,7 +1087,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
         </>)}
 
-        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || (modal.type === "newRequest" && selCat?.vendorRequired && !(form.vendor || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
+        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim()))}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
       </div>
     </div>
   );

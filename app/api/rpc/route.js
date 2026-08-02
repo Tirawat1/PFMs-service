@@ -18,6 +18,7 @@ import { validateVendorAtSubmission } from "@/lib/vendor-required.mjs";
 import { payDepositTx, remainingAfterDeposit } from "@/lib/deposit.mjs";
 import { canReturnForCorrection } from "@/lib/return-correction.mjs";
 import { checkTransitionGuards } from "@/lib/transition-guards.mjs";
+import { canEditRequest, mergeDocsForCategoryChange } from "@/lib/edit-request.mjs";
 import { editAmountTx, deleteTxnTx } from "@/lib/corrections.mjs";
 import { applyStatusOverride } from "@/lib/status-override.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
@@ -103,6 +104,62 @@ export async function POST(req) {
         await audit(me, "Submitted reimbursement " + id + (proj ? " against projection " + proj.id : ""));
         await notifyPerm("verify", "New reimbursement " + id + " (" + title + ") notified to Project Finance.", "notified", me.id);
         return NextResponse.json({ ok: true, id });
+      }
+      case "editRequest": {
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        if (!canEditRequest({ admin, requesterId: r.requesterId, userId: me.id, status: r.status })) return err("Forbidden", 403);
+        const title = (body.title || "").trim();
+        if (!title) return err("Enter a title.");
+        const categoryId = body.categoryId || r.categoryId;
+        const cat = await prisma.category.findUnique({ where: { id: categoryId } });
+        if (!cat || !cat.active) return err("Unknown category.");
+        const amount = Number(body.amount);
+        if (!Number.isFinite(amount) || amount <= 0) return err("Enter a positive amount.");
+        const vendor = (body.vendor ?? r.vendor ?? "").trim();
+        const vendorCheck = validateVendorAtSubmission({ categoryVendorRequired: cat.vendorRequired, vendor });
+        if (vendorCheck.error) return err(vendorCheck.error);
+        const parsedEventDate = body.eventDate ? new Date(body.eventDate) : r.eventDate;
+        const docs = categoryId !== r.categoryId ? mergeDocsForCategoryChange(r.docs, cat.docsPre, cat.docsPost) : r.docs;
+        await prisma.request.update({
+          where: { id: r.id },
+          data: {
+            title, categoryId, amount, vendor, docs,
+            desc: body.desc ?? r.desc,
+            paidVia: body.paidVia || r.paidVia,
+            eventDate: isNaN(parsedEventDate) ? r.eventDate : parsedEventDate,
+          },
+        });
+        await audit(me, "Edited request " + r.id);
+        if (r.requesterId && r.requesterId !== me.id) await notifyUser(r.requesterId, r.id + " — request details were edited by " + me.name + ".", "notified");
+        return NextResponse.json({ ok: true });
+      }
+      case "setBankInfo": {
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        if (!canEditRequest({ admin, requesterId: r.requesterId, userId: me.id, status: r.status })) return err("Forbidden", 403);
+        const holder = (body.holder || "").trim();
+        const bankName = (body.bank || "").trim();
+        const acctNo = (body.acctNo || "").trim();
+        if (!holder || !bankName || !acctNo) return err("Enter the account holder, bank, and account number.");
+        const bank = {
+          holder, bank: bankName, acctNo,
+          branch: (body.branch || "").trim(), promptpay: (body.promptpay || "").trim(), note: (body.note || "").trim(),
+          by: me.name, byRole: me.role.name, ts: Date.now(),
+        };
+        await prisma.request.update({ where: { id: r.id }, data: { bank } });
+        await audit(me, "Provided receiving bank account details for " + r.id);
+        await notifyPerm("disburse", r.id + " — receiving bank account details provided.", "notified", me.id);
+        return NextResponse.json({ ok: true });
+      }
+      case "requestBankInfo": {
+        if (!admin && !can(me, "disburse")) return err("Forbidden", 403);
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        if (!r.requesterId) return err("This request has no requester to notify.");
+        await notifyUser(r.requesterId, r.id + " — please provide the receiving bank account details.", "notified");
+        await audit(me, "Requested receiving bank account details for " + r.id);
+        return NextResponse.json({ ok: true });
       }
       case "createProjection": {
         if (!can(me, "create")) return err("Forbidden", 403);
