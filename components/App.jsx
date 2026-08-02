@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ORDER, STATUS, PERMKEYS, ADV_LABELS, ADV_PERM } from "@/lib/constants";
 import { isDocEditable } from "@/lib/doc-phase.mjs";
+import { parseNotificationRef } from "@/lib/notification-ref.mjs";
+import { auditCategory } from "@/lib/audit-category.mjs";
 
 const fmt = (n) => "฿" + Math.round(n).toLocaleString("en-US");
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
@@ -778,18 +780,48 @@ function DocMenu({ data, rpc }) {
 
 /* ---------- Audit ---------- */
 function AuditTrail({ data }) {
+  const [user, setUser] = useState("");
+  const [role, setRole] = useState("");
+  const [cat, setCat] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const tagged = useMemo(() => data.audit.map((a) => ({ ...a, cat: auditCategory(a.action) })), [data.audit]);
+  const users = useMemo(() => [...new Set(data.audit.map((a) => a.user))].sort(), [data.audit]);
+  const roles = useMemo(() => [...new Set(data.audit.map((a) => a.role))].sort(), [data.audit]);
+  const cats = useMemo(() => [...new Set(tagged.map((a) => a.cat))].sort(), [tagged]);
+  const filtered = tagged.filter((a) => {
+    if (user && a.user !== user) return false;
+    if (role && a.role !== role) return false;
+    if (cat && a.cat !== cat) return false;
+    const ts = new Date(a.ts).getTime();
+    if (from && ts < new Date(from).getTime()) return false;
+    if (to && ts > new Date(to).getTime() + 86400000) return false;
+    return true;
+  });
+  const hasFilters = user || role || cat || from || to;
   return (<>
     <div className="pagehead"><div><h1 className="h1 dsp">Audit <span className="gradt">Trail</span></h1><p className="sub">A record of user activity by role. Visible to administrators only.</p></div></div>
+    <div className="panel" style={{ padding: "14px 16px", marginBottom: 14 }}>
+      <div className="fx gap12" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div className="field" style={{ minWidth: 140, marginBottom: 0 }}><label className="label">User</label><select className="input" value={user} onChange={(e) => setUser(e.target.value)}><option value="">All users</option>{users.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+        <div className="field" style={{ minWidth: 140, marginBottom: 0 }}><label className="label">Role</label><select className="input" value={role} onChange={(e) => setRole(e.target.value)}><option value="">All roles</option>{roles.map((r) => <option key={r} value={r}>{r}</option>)}</select></div>
+        <div className="field" style={{ minWidth: 160, marginBottom: 0 }}><label className="label">Category</label><select className="input" value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All categories</option>{cats.map((c) => <option key={c} value={c}>{c}</option>)}</select></div>
+        <div className="field" style={{ marginBottom: 0 }}><label className="label">From</label><input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+        <div className="field" style={{ marginBottom: 0 }}><label className="label">To</label><input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></div>
+        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => { setUser(""); setRole(""); setCat(""); setFrom(""); setTo(""); }}><i className="ph ph-x" /> Clear filters</button>}
+      </div>
+      <div className="dim" style={{ fontSize: 12.5, marginTop: 10 }}>{filtered.length} of {data.audit.length} entries shown</div>
+    </div>
     <div className="panel" style={{ padding: "8px 8px 4px" }}>
-      <div className="tblwrap"><table className="tbl"><thead><tr><th>Time</th><th>User</th><th>Role</th><th>Action</th></tr></thead><tbody>
-        {data.audit.map((a) => <tr key={a.id} className="trow"><td className="dim mono" style={{ fontSize: 12.5 }}>{fmtTime(a.ts)}</td><td className="tt">{a.user}</td><td className="muted">{a.role}</td><td className="th">{a.action}</td></tr>)}
+      <div className="tblwrap"><table className="tbl"><thead><tr><th>Time</th><th>User</th><th>Role</th><th>Category</th><th>Action</th></tr></thead><tbody>
+        {filtered.map((a) => <tr key={a.id} className="trow"><td className="dim mono" style={{ fontSize: 12.5 }}>{fmtTime(a.ts)}</td><td className="tt">{a.user}</td><td className="muted">{a.role}</td><td><span className="tag">{a.cat}</span></td><td className="th">{a.action}</td></tr>)}
       </tbody></table></div>
     </div>
   </>);
 }
 
 /* ---------- Notifications ---------- */
-function Notifs({ data, rpc }) {
+function Notifs({ data, rpc, go }) {
   const meta = {
     notified: { i: "ph-megaphone", c: "var(--amber)", bg: "rgba(245,181,68,.16)" },
     docs_submitted: { i: "ph-files", c: "#0e7490", bg: "rgba(8,145,178,.14)" },
@@ -810,10 +842,19 @@ function Notifs({ data, rpc }) {
       {data.notifs.length === 0 && <div className="empty"><i className="ph ph-bell" />No notifications yet.</div>}
       {data.notifs.map((n) => {
         const m = meta[n.type] || meta.notified;
+        const ref = parseNotificationRef(n.text);
+        const openRef = () => {
+          if (!n.read) rpc("markNotifRead", { id: n.id });
+          if (!ref) return;
+          if (ref.kind === "request") go("detail", { detailId: ref.id });
+          else if (ref.kind === "projection") go("projections");
+          else if (ref.kind === "revenue") go("revenue");
+        };
         return (
-          <div key={n.id} className={"notif" + (n.read ? "" : " unread")}>
+          <div key={n.id} className={"notif" + (n.read ? "" : " unread")} style={ref ? { cursor: "pointer" } : undefined} onClick={ref ? openRef : undefined}>
             <div className="notif-ic" style={{ background: m.bg, color: m.c }}><i className={"ph " + m.i} /></div>
             <div style={{ flex: 1 }}><div className="th" style={{ fontWeight: 600, fontSize: 14 }}>{n.text}</div><div className="dim" style={{ fontSize: 12, marginTop: 3 }}>{fmtTime(n.ts)}</div></div>
+            {ref && <i className="ph ph-arrow-right dim" style={{ fontSize: 15 }} />}
           </div>
         );
       })}

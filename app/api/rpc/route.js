@@ -782,6 +782,10 @@ export async function POST(req) {
         await prisma.notification.updateMany({ where: { userId: me.id }, data: { read: true } });
         return NextResponse.json({ ok: true });
       }
+      case "markNotifRead": {
+        await prisma.notification.updateMany({ where: { id: body.id, userId: me.id }, data: { read: true } });
+        return NextResponse.json({ ok: true });
+      }
       case "updateSettings": {
         await prisma.user.update({
           where: { id: me.id },
