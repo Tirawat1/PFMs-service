@@ -17,6 +17,7 @@ import { canApproveCategory } from "@/lib/payment-routing.mjs";
 import { validateVendorAtSubmission } from "@/lib/vendor-required.mjs";
 import { payDepositTx, remainingAfterDeposit } from "@/lib/deposit.mjs";
 import { canReturnForCorrection } from "@/lib/return-correction.mjs";
+import { checkTransitionGuards } from "@/lib/transition-guards.mjs";
 import { editAmountTx, deleteTxnTx } from "@/lib/corrections.mjs";
 import { applyStatusOverride } from "@/lib/status-override.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
@@ -196,6 +197,11 @@ export async function POST(req) {
           if (!canApproveCategory({ admin, hasVerifyPerm: can(me, "verify"), roleApproverKey: me.role.approverKey, categoryApproverRole: rCat?.approverRole })) {
             return err("This expense category is routed to another approver.");
           }
+        }
+        if (["docs_submitted", "verified", "purchase_complete", "closed"].includes(next)) {
+          const guardCat = await prisma.category.findUnique({ where: { id: r.categoryId } });
+          const guard = checkTransitionGuards({ next, docs: r.docs, requireCompletionDocs: guardCat?.requireCompletionDocs ?? true });
+          if (guard.error) return err(guard.error);
         }
 
         let acctId, proofLink, acctName, route, payee, payNote, actualAmount, streamId;
