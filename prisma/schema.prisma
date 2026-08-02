@@ -41,6 +41,7 @@ model Category {
   docsPre               Json    @default("[]") // document names required before disbursement
   docsPost              Json    @default("[]") // document names required to close the request, after disbursement
   docExamples           Json    @default("{}") // { [docName]: { link, name } } — an example file shown beside that checklist item
+  samples               Json    @default("[]") // [{name, link}] — category-level "what a correct submission looks like" reference files
   requireCompletionDocs Boolean @default(true) // whether docsPost must be submitted before the request can reach "closed"
   notes         String  @default("")
   defaultAcctId String?
@@ -122,8 +123,18 @@ model Request {
   bank              Json? // {holder, bank, acctNo, branch, promptpay, note, by, byRole, ts} — receiving account for reimbursement
   po                Json?
   payProof          Json?
+  fundRoute         Json? // {streamId, amount, by, byRole, ts} — a manual Faculty -> Project purse transfer, independent of the advance/projection flow
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+model UndoLog {
+  id       String   @id @default(cuid()) // one row per user — a new snapshot replaces the previous one
+  userId   String   @unique
+  action   String // human-readable description shown on the undo bar
+  reqId    String
+  snapshot Json // the Request row's mutable fields, exactly as they were before the action
+  ts       DateTime @default(now())
 }
 
 model Projection {

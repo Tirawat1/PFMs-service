@@ -124,6 +124,18 @@ export default function App() {
             </div>
           </header>
           <div className="content">
+            {me.role.isMigrationOperator && (
+              <div className="mig-banner">
+                <i className="ph ph-database" />
+                <span>Data-migration mode. This account has full access to every screen and can edit any figure or status directly. Records you create or change here are tagged Migrated.</span>
+              </div>
+            )}
+            {data.undo && (
+              <div className="drive-banner" style={{ marginBottom: 14 }}>
+                <i className="ph ph-arrow-counter-clockwise" />
+                <span style={{ flex: 1 }}>Your last action — {data.undo.action} · <a href="#" onClick={(e) => { e.preventDefault(); rpc("undoLast", {}, "Last action undone."); }} style={{ color: "#7cb3ff", fontWeight: 700 }}>Undo</a> / <a href="#" onClick={(e) => { e.preventDefault(); rpc("dismissUndo", {}); }} style={{ color: "var(--mut)" }}>Dismiss</a></span>
+              </div>
+            )}
             {screen === "dashboard" && <Dashboard {...ctx} />}
             {screen === "requests" && <Requests {...ctx} />}
             {screen === "projections" && <Projections {...ctx} />}
@@ -532,6 +544,12 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         </div>
         <div><div className="label" style={{ marginBottom: 5 }}>Description</div><div className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{r.desc || "Reimbursement request submitted by " + r.requesterName + "."}</div></div>
         {c && c.notes && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--soft)", border: "1px solid rgba(240,55,138,.2)" }}><div style={{ fontSize: 12, fontWeight: 800, color: "var(--accent2)", marginBottom: 5 }}><i className="ph ph-info" /> Category note</div><div className="muted th" style={{ fontSize: 13, lineHeight: 1.5 }}>{c.notes}</div></div>}
+        {c && (c.samples || []).length > 0 && (
+          <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 7 }}><i className="ph ph-lightbulb" /> Sample documents for this category</div>
+            {c.samples.map((s, i) => <a key={i} href={s.link} target="_blank" rel="noreferrer" style={{ display: "block", fontSize: 12.5, color: "#7cb3ff", marginTop: 3 }}>{s.name} ↗</a>)}
+          </div>
+        )}
         {(isRequester || admin) && r.vendorExists == null && (
           <div className="issue-box">
             <div className="issue-title">Is the supplier an already-registered vendor?</div>
@@ -576,6 +594,12 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
             <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ link: "", ref: "", date: new Date().toISOString().slice(0, 10), note: "" }); setModal({ type: "proofPay", reqId: r.id }); }}><i className="ph ph-receipt" /> Attach proof of payment</button>
             {!r.depositPaid && r.status !== "closed" && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ amount: "", streamId: data.streams?.[0]?.id || "" }); setModal({ type: "payDeposit", reqId: r.id }); }}><i className="ph ph-coins" /> Pay deposit</button>}
           </div>
+        )}
+        {admin && r.status === "verified" && !r.fundRoute && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ streamId: data.streams?.[0]?.id || "" }); setModal({ type: "routeFunds", reqId: r.id, reqAmount: r.amount }); }}><i className="ph ph-arrows-left-right" /> Route funds to a purse</button>
+        )}
+        {r.fundRoute && (
+          <div className="dim" style={{ fontSize: 12.5 }}><i className="ph ph-arrows-left-right" /> {fmt(r.fundRoute.amount)} routed to {data.streams?.find((s) => s.id === r.fundRoute.streamId)?.name || r.fundRoute.streamId} by {r.fundRoute.by}</div>
         )}
         {proj && (
           <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
@@ -627,6 +651,8 @@ function CatEdit({ data, go, rpc, catId }) {
   const [draft, setDraft] = useState("");
   const [phase, setPhase] = useState("pre");
   const [exampleDraft, setExampleDraft] = useState({});
+  const [sampleName, setSampleName] = useState("");
+  const [sampleLink, setSampleLink] = useState("");
   if (!c) return null;
   const list = phase === "post" ? c.docsPost : c.docsPre;
   const examples = c.docExamples || {};
@@ -689,6 +715,21 @@ function CatEdit({ data, go, rpc, catId }) {
         <div className="fx ac jb" style={{ marginTop: 16 }}>
           <div><div style={{ fontWeight: 700, fontSize: 14 }}>Vendor required</div><div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>This category always involves an external supplier — vendor name must be given at submission.</div></div>
           <div className={"switch" + (c.vendorRequired ? " on" : "")} onClick={() => rpc("toggleCategoryVendorRequired", { id: c.id })} />
+        </div>
+        <div style={{ marginTop: 20 }}>
+          <div className="fx ac jb" style={{ marginBottom: 10 }}><label className="label" style={{ margin: 0 }}>Sample documents</label><span className="dim" style={{ fontSize: 12 }}>{(c.samples || []).length}</span></div>
+          <p className="dim" style={{ fontSize: 12.5, margin: "0 0 10px" }}>Reference files shown on every request in this category — "here's what a correct submission looks like."</p>
+          {(c.samples || []).map((s, i) => (
+            <div key={i} className="fx ac gap8" style={{ padding: "6px 0" }}>
+              <a href={s.link} target="_blank" rel="noreferrer" className="th" style={{ flex: 1, fontSize: 13, color: "#7cb3ff" }}>{s.name}</a>
+              <i className="ph ph-trash chip-act" onClick={() => rpc("removeCategorySample", { id: c.id, idx: i })} />
+            </div>
+          ))}
+          <div className="fx gap8" style={{ marginTop: 8 }}>
+            <input className="input" placeholder="Sample name" value={sampleName} onChange={(e) => setSampleName(e.target.value)} style={{ flex: 1 }} />
+            <input className="input" placeholder="Drive link" value={sampleLink} onChange={(e) => setSampleLink(e.target.value)} style={{ flex: 1 }} />
+            <button className="btn btn-ghost btn-sm" onClick={async () => { if (await rpc("addCategorySample", { id: c.id, name: sampleName, link: sampleLink })) { setSampleName(""); setSampleLink(""); } }}><i className="ph ph-plus" /></button>
+          </div>
         </div>
       </div>
       <div className="panel">
@@ -994,7 +1035,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step" };
+  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step", routeFunds: "Route funds to a purse" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -1021,6 +1062,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "editNumber") ok = await rpc("editRecordAmount", { kind: modal.kind, id: modal.id, field: modal.field, newValue: form.newValue, reason: form.reason }, "Correction saved.");
     else if (modal.type === "deleteTxn") ok = await rpc("deleteTransaction", { id: modal.txnId, reason: form.reason }, "Transaction deleted.");
     else if (modal.type === "reverseStep") ok = await rpc("reverseRequest", { id: modal.reqId, reason: form.reason }, "Request reversed to the previous step.");
+    else if (modal.type === "routeFunds") ok = await rpc("routeFunds", { id: modal.reqId, streamId: form.streamId }, "Funds routed.");
     if (ok) close();
   };
 
@@ -1204,6 +1246,11 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Reason (optional)</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="Why is this being reversed?" /></div>
         </>)}
 
+        {modal.type === "routeFunds" && (<>
+          <div className="attn"><i className="ph-fill ph-info" /><span>Transfers {fmt(modal.reqAmount)} from the Faculty account into the chosen purse — independent of the advance/projection flow.</span></div>
+          <div className="field"><label className="label">Purse</label><select className="input" value={form.streamId || ""} onChange={set("streamId")}>{(data.streams || []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name} ({fmt(s.balance)})</option>)}</select></div>
+        </>)}
+
         {modal.type === "bankInfo" && (<>
           <div className="field"><label className="label">Account holder</label><input className="input" value={form.holder || ""} onChange={set("holder")} placeholder="Name on the receiving account" /></div>
           <div className="field"><label className="label">Bank</label><input className="input" value={form.bank || ""} onChange={set("bank")} placeholder="e.g. Kasikornbank" /></div>
@@ -1224,7 +1271,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
         </>)}
 
-        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim()))}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
+        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim())) || (modal.type === "routeFunds" && !form.streamId)}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
       </div>
     </div>
   );

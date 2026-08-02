@@ -9,7 +9,7 @@ export async function GET() {
   if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const admin = can(me, "*") || (me.role.perms || []).includes("*");
 
-  const [roles, users, categories, masterDocs, accounts, txns, requests, projections, streams, revenues, notifs, audit] =
+  const [roles, users, categories, masterDocs, accounts, txns, requests, projections, streams, revenues, notifs, audit, undo] =
     await Promise.all([
       prisma.role.findMany(),
       prisma.user.findMany({ include: { role: true } }),
@@ -23,6 +23,7 @@ export async function GET() {
       prisma.revenue.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.notification.findMany({ where: { userId: me.id }, orderBy: { ts: "desc" }, take: 100 }),
       admin ? prisma.audit.findMany({ orderBy: { ts: "desc" }, take: 300 }) : Promise.resolve([]),
+      prisma.undoLog.findUnique({ where: { userId: me.id } }),
     ]);
 
   const shaped = shapeSnapshot(
@@ -30,5 +31,5 @@ export async function GET() {
     { roles, users: users.map(sanitizeUser), categories, masterDocs, accounts, txns, requests, projections, streams, revenues, notifs, audit }
   );
 
-  return NextResponse.json({ me: sanitizeUser(me), ...shaped });
+  return NextResponse.json({ me: sanitizeUser(me), ...shaped, undo: undo ? { action: undo.action, ts: undo.ts } : null });
 }

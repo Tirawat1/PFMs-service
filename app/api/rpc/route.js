@@ -20,6 +20,8 @@ import { canReturnForCorrection } from "@/lib/return-correction.mjs";
 import { checkTransitionGuards } from "@/lib/transition-guards.mjs";
 import { canEditRequest, mergeDocsForCategoryChange } from "@/lib/edit-request.mjs";
 import { reverseRequestTx } from "@/lib/reversal.mjs";
+import { buildRequestSnapshot } from "@/lib/undo.mjs";
+import { routeFundsTx } from "@/lib/route-funds.mjs";
 import { editAmountTx, deleteTxnTx } from "@/lib/corrections.mjs";
 import { applyStatusOverride } from "@/lib/status-override.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
@@ -29,6 +31,17 @@ const fmt = (n) => "฿" + Math.round(n).toLocaleString("en-US");
 
 async function audit(me, action) {
   await prisma.audit.create({ data: { user: me.name, role: me.role.name, action } });
+}
+
+// Records a single restorable undo slot per user — a later call replaces the previous
+// one, matching "your last action only" rather than a full history stack.
+async function saveUndo(userId, action, request) {
+  const snapshot = buildRequestSnapshot(request);
+  await prisma.undoLog.upsert({
+    where: { userId },
+    create: { userId, action, reqId: request.id, snapshot },
+    update: { action, reqId: request.id, snapshot },
+  });
 }
 
 async function notifyUser(userId, text, type) {
@@ -97,6 +110,7 @@ export async function POST(req) {
             directClaim: source.directClaim,
             paidVia: paidVia || cat.defaultPaidVia,
             vendor: (vendor || "").trim(),
+            migrated: !!me.role.isMigrationOperator,
           },
         });
         if (proj) {
@@ -122,6 +136,7 @@ export async function POST(req) {
         if (vendorCheck.error) return err(vendorCheck.error);
         const parsedEventDate = body.eventDate ? new Date(body.eventDate) : r.eventDate;
         const docs = categoryId !== r.categoryId ? mergeDocsForCategoryChange(r.docs, cat.docsPre, cat.docsPost) : r.docs;
+        await saveUndo(me.id, "Edited request " + r.id, r);
         await prisma.request.update({
           where: { id: r.id },
           data: {
@@ -129,6 +144,7 @@ export async function POST(req) {
             desc: body.desc ?? r.desc,
             paidVia: body.paidVia || r.paidVia,
             eventDate: isNaN(parsedEventDate) ? r.eventDate : parsedEventDate,
+            migrated: r.migrated || !!me.role.isMigrationOperator,
           },
         });
         await audit(me, "Edited request " + r.id);
@@ -148,6 +164,7 @@ export async function POST(req) {
           branch: (body.branch || "").trim(), promptpay: (body.promptpay || "").trim(), note: (body.note || "").trim(),
           by: me.name, byRole: me.role.name, ts: Date.now(),
         };
+        await saveUndo(me.id, "Set bank info for " + r.id, r);
         await prisma.request.update({ where: { id: r.id }, data: { bank } });
         await audit(me, "Provided receiving bank account details for " + r.id);
         await notifyPerm("disburse", r.id + " — receiving bank account details provided.", "notified", me.id);
@@ -180,6 +197,7 @@ export async function POST(req) {
             id, title, categoryId, amount: parsedAmount,
             dept: me.dept, requesterId: me.id, requesterName: me.name,
             expectedDate: expectedDate ? new Date(expectedDate) : new Date(),
+            migrated: !!me.role.isMigrationOperator,
           },
         });
         await audit(me, "Submitted projection " + id + " (" + fmt(parsedAmount) + ") for " + me.dept);
@@ -235,6 +253,7 @@ export async function POST(req) {
           const vendorDocs = await prisma.masterDoc.findMany({ where: { vendorDoc: true } });
           docs = addVendorDocs(r.docs, vendorDocs.map((d) => d.name));
         }
+        await saveUndo(me.id, "Reported vendor status for " + r.id, r);
         await prisma.request.update({ where: { id: r.id }, data: { vendorExists: exists, vendor: (body.vendor ?? r.vendor), docs } });
         await audit(me, exists ? "Confirmed existing vendor for " + r.id : "Reported new vendor for " + r.id + " — added vendor-registration documents");
         if (!exists) {
@@ -348,6 +367,24 @@ export async function POST(req) {
         await notifyUser(r.requesterId, r.id + " — reversed back to " + STATUS[prevStatus].label + " by " + me.name + (body.reason ? ": " + body.reason : "") + ".", "solved");
         return NextResponse.json({ ok: true });
       }
+      case "routeFunds": {
+        if (!admin) return err("Forbidden", 403);
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        if (r.status !== "verified") return err("Funds can only be routed for a verified request.");
+        if (r.fundRoute) return err("Funds have already been routed for this request.");
+        const stream = await prisma.stream.findUnique({ where: { id: body.streamId } });
+        if (!stream || !stream.active) return err("Purse is unavailable.");
+        const faculty = await prisma.account.findUnique({ where: { id: "faculty" } });
+        if (!faculty || !faculty.active) return err("Faculty account is unavailable.");
+        if (faculty.balance < r.amount) return err("Insufficient balance in the Faculty account.");
+        await routeFundsTx(prisma, {
+          reqId: r.id, streamId: stream.id, streamAcctId: stream.acctId, amount: r.amount,
+          facultyAcctId: "faculty", title: r.title, by: me.name, byRole: me.role.name,
+        });
+        await audit(me, "Routed " + fmt(r.amount) + " from Faculty to " + stream.name + " purse for " + r.id);
+        return NextResponse.json({ ok: true });
+      }
       case "payDeposit": {
         if (!admin && !can(me, "disburse")) return err("Forbidden", 403);
         const r = await prisma.request.findUnique({ where: { id: body.id } });
@@ -402,6 +439,7 @@ export async function POST(req) {
         if (!isDocEditable({ phase: doc.phase, status: r.status })) {
           return err((doc.phase === "post" ? "Closing documents open once funds are disbursed." : "Pre-reimbursement documents are locked after verification."));
         }
+        await saveUndo(me.id, (action === "attachDoc" ? "Submitted document \"" : "Detached document \"") + doc.name + "\" on " + r.id, r);
         if (action === "attachDoc") {
           if (!body.link) return err("Paste a Google Drive link.");
           doc.submitted = true;
@@ -427,6 +465,7 @@ export async function POST(req) {
         const docs = r.docs;
         const doc = docs[body.idx];
         if (!doc) return err("Unknown document.");
+        await saveUndo(me.id, 'Flagged discrepancy on "' + doc.name + '" (' + r.id + ")", r);
         doc.disc = { open: true, note: body.note || "", by: me.name, ts: Date.now(), fixed: false, fixedNote: "" };
         await prisma.request.update({ where: { id: r.id }, data: { docs } });
         await audit(me, 'Flagged discrepancy on "' + doc.name + '" (' + r.id + ")");
@@ -442,6 +481,7 @@ export async function POST(req) {
         const docs = r.docs;
         const doc = docs[body.idx];
         if (!doc || !doc.disc || !doc.disc.open) return err("No open discrepancy.");
+        await saveUndo(me.id, 'Marked "' + doc.name + '" as revised (' + r.id + ")", r);
         doc.disc.fixed = true;
         doc.disc.fixedNote = body.note || "";
         await prisma.request.update({ where: { id: r.id }, data: { docs } });
@@ -458,6 +498,7 @@ export async function POST(req) {
         const docs = r.docs;
         const doc = docs[body.idx];
         if (!doc || !doc.disc) return err("No discrepancy.");
+        await saveUndo(me.id, 'Resolved discrepancy on "' + doc.name + '" (' + r.id + ")", r);
         doc.disc = null;
         await prisma.request.update({ where: { id: r.id }, data: { docs } });
         await audit(me, 'Resolved discrepancy on "' + doc.name + '" (' + r.id + ")");
@@ -471,6 +512,7 @@ export async function POST(req) {
         const reason = (body.reason || "").trim();
         const check = canReturnForCorrection({ status: r.status, reason });
         if (check.error) return err(check.error);
+        await saveUndo(me.id, "Returned " + r.id + " for correction", r);
         await prisma.request.update({ where: { id: r.id }, data: { status: "notified", issueReason: reason } });
         await audit(me, "Returned " + r.id + " for correction — " + reason);
         await notifyUser(r.requesterId, r.id + " returned for correction: " + reason, "notified");
@@ -557,6 +599,27 @@ export async function POST(req) {
         await prisma.category.update({ where: { id: c.id }, data: { docExamples } });
         return NextResponse.json({ ok: true });
       }
+      case "addCategorySample": {
+        if (!admin) return err("Forbidden", 403);
+        const name = (body.name || "").trim();
+        const link = (body.link || "").trim();
+        if (!name || !link) return err("Enter a name and a Drive link for the sample.");
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        const samples = [...(c.samples || []), { name, link }];
+        await prisma.category.update({ where: { id: c.id }, data: { samples } });
+        await audit(me, 'Added sample document "' + name + '" to category ' + c.name);
+        return NextResponse.json({ ok: true });
+      }
+      case "removeCategorySample": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        const samples = (c.samples || []).filter((_, i) => i !== body.idx);
+        await prisma.category.update({ where: { id: c.id }, data: { samples } });
+        await audit(me, "Removed sample document from category " + c.name);
+        return NextResponse.json({ ok: true });
+      }
       case "addMasterDoc": {
         if (!admin) return err("Forbidden", 403);
         const name = (body.name || "").trim();
@@ -610,6 +673,7 @@ export async function POST(req) {
           data: {
             id, title, source: source || "", amount: parsedAmount, streamId: streamId || null,
             expectedDate: expectedDate ? new Date(expectedDate) : new Date(),
+            migrated: !!me.role.isMigrationOperator,
           },
         });
         await audit(me, "Projected revenue " + id + " — " + title + " (" + fmt(parsedAmount) + ")");
@@ -784,6 +848,18 @@ export async function POST(req) {
       }
       case "markNotifRead": {
         await prisma.notification.updateMany({ where: { id: body.id, userId: me.id }, data: { read: true } });
+        return NextResponse.json({ ok: true });
+      }
+      case "undoLast": {
+        const log = await prisma.undoLog.findUnique({ where: { userId: me.id } });
+        if (!log) return err("Nothing to undo.");
+        await prisma.request.update({ where: { id: log.reqId }, data: log.snapshot });
+        await prisma.undoLog.delete({ where: { userId: me.id } });
+        await audit(me, "Undid last action — " + log.action);
+        return NextResponse.json({ ok: true });
+      }
+      case "dismissUndo": {
+        await prisma.undoLog.deleteMany({ where: { userId: me.id } });
         return NextResponse.json({ ok: true });
       }
       case "updateSettings": {
