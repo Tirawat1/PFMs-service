@@ -180,7 +180,78 @@ function Login({ onLoggedIn }) {
 }
 
 /* ---------- Dashboard ---------- */
-function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm }) {
+function Dashboard(props) {
+  const { me, admin, can } = props;
+  const isDeptUser = !admin && !can("verify") && !can("disburse") && !can("accounts");
+  return isDeptUser ? <DeptDashboard {...props} /> : <FinDashboard {...props} />;
+}
+
+function DeptDashboard({ me, data, can, catName, go, setModal, setForm }) {
+  const myProjections = (data.projections || []).filter((p) => p.requesterId === me.id || p.dept === me.dept);
+  const myRequests = data.requests.filter((r) => r.requesterId === me.id || r.dept === me.dept);
+  const inProgress = myRequests.filter((r) => r.status !== "closed");
+  const openProjectedTotal = myProjections.filter((p) => p.status !== "settled").reduce((s, p) => s + p.amount, 0);
+  const docsToSubmit = myRequests.reduce((s, r) => s + r.docs.filter((d) => !d.submitted && isDocEditable({ phase: d.phase || "pre", status: r.status })).length, 0);
+  const flaggedCount = myRequests.reduce((s, r) => s + r.docs.filter((d) => d.disc && d.disc.open).length, 0);
+  const attention = flaggedCount > 0
+    ? { icon: "ph-warning", text: flaggedCount + " document" + (flaggedCount > 1 ? "s" : "") + " flagged with a discrepancy — check your reimbursements." }
+    : docsToSubmit > 0
+    ? { icon: "ph-files", text: "You have " + docsToSubmit + " document" + (docsToSubmit > 1 ? "s" : "") + " to submit." }
+    : { icon: "ph-check-circle", text: "You're all caught up — nothing needs action right now." };
+
+  return (<>
+    <div className="pagehead">
+      <div><h1 className="h1 dsp">My <span className="gradt">Overview</span></h1><p className="sub">Your projected expenses and reimbursements, {me.dept}.</p></div>
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
+    </div>
+    <div className="attn"><i className={"ph-fill " + attention.icon} style={{ color: flaggedCount > 0 ? "var(--amber)" : "var(--accent2)" }} /><span>{attention.text}</span></div>
+    <div className="stats">
+      <div className="stat"><div className="stat-ic" style={{ background: "rgba(124,58,237,.14)", color: "#7c3aed" }}><i className="ph ph-chart-line-up" /></div><div className="stat-v mono">{fmt(openProjectedTotal)}</div><div className="stat-l">Projected expenses</div><div className="stat-s dim">{myProjections.length} submitted</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "rgba(245,181,68,.14)", color: "var(--amber)" }}><i className="ph ph-hourglass-medium" /></div><div className="stat-v mono">{fmt(inProgress.reduce((s, r) => s + r.amount, 0))}</div><div className="stat-l">Reimbursements in progress</div><div className="stat-s dim">{inProgress.length} requests</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "rgba(8,145,178,.14)", color: "#0e7490" }}><i className="ph ph-files" /></div><div className="stat-v mono">{docsToSubmit}</div><div className="stat-l">Documents to submit now</div><div className="stat-s dim">across all your requests</div></div>
+    </div>
+    <div className="panel">
+      <div className="fx ac jb" style={{ marginBottom: 14 }}><h3 className="panel-t">My projected expenses</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{myProjections.length}</span></div>
+      {myProjections.length === 0 ? <div className="empty" style={{ padding: 26 }}><i className="ph ph-chart-line-up" />No projected expenses yet.</div> : (
+        <div className="tblwrap"><table className="tbl"><thead><tr><th>Title</th><th>Amount</th><th>Expected date</th><th>Status</th></tr></thead><tbody>
+          {myProjections.map((p) => (
+            <tr key={p.id} className="trow"><td><div className="tt">{p.title}</div><div className="tsub">{p.id}</div></td><td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}</td><td className="muted">{fmtDate(p.expectedDate)}</td><td><span className="badge st-notified">{PJ_LABEL[p.status] || p.status}</span></td></tr>
+          ))}
+        </tbody></table></div>
+      )}
+    </div>
+    <div className="panel">
+      <div className="fx ac jb" style={{ marginBottom: 14 }}><h3 className="panel-t">My reimbursements</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{myRequests.length}</span></div>
+      {myRequests.length === 0 ? <div className="empty" style={{ padding: 26 }}><i className="ph ph-tray" />No reimbursement requests yet.</div> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {myRequests.map((r) => {
+            const c = data.categories.find((x) => x.id === r.categoryId);
+            const ci = ORDER.indexOf(r.status);
+            const pct = Math.round(((ci + 1) / ORDER.length) * 100);
+            const pre = r.docs.filter((d) => (d.phase || "pre") === "pre");
+            const post = r.docs.filter((d) => d.phase === "post");
+            const prePct = pre.length ? Math.round((pre.filter((d) => d.submitted).length / pre.length) * 100) : 100;
+            const postPct = post.length ? Math.round((post.filter((d) => d.submitted).length / post.length) * 100) : 100;
+            return (
+              <div key={r.id} className="panel" style={{ padding: "13px 15px", cursor: "pointer" }} onClick={() => go("detail", { detailId: r.id })}>
+                <div className="fx ac jb"><div className="tt">{r.title}</div><span className={"badge st-" + r.status}>{STATUS[r.status].label}</span></div>
+                <div className="dim" style={{ fontSize: 12, margin: "3px 0 10px" }}>{r.id} · {fmt(r.amount)}{c ? " · " + catName(c) : ""}</div>
+                <div className="dim" style={{ fontSize: 10.5, fontWeight: 800, marginBottom: 3 }}>PIPELINE</div>
+                <div style={{ height: 6, borderRadius: 4, background: "var(--line2)", overflow: "hidden", marginBottom: 8 }}><div style={{ width: pct + "%", height: "100%", background: "var(--accent2)" }} /></div>
+                <div className="fx gap16">
+                  <div style={{ flex: 1 }}><div className="dim" style={{ fontSize: 10.5, fontWeight: 800, marginBottom: 3 }}>DOCS P1</div><div style={{ height: 6, borderRadius: 4, background: "var(--line2)", overflow: "hidden" }}><div style={{ width: prePct + "%", height: "100%", background: "#0e7490" }} /></div></div>
+                  <div style={{ flex: 1 }}><div className="dim" style={{ fontSize: 10.5, fontWeight: 800, marginBottom: 3 }}>DOCS P2</div><div style={{ height: 6, borderRadius: 4, background: "var(--line2)", overflow: "hidden" }}><div style={{ width: postPct + "%", height: "100%", background: "var(--green)" }} /></div></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </>);
+}
+
+function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setForm, setReqFilter }) {
   const accts = data.accounts;
   const activeAccts = accts.filter((a) => a.active);
   const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
@@ -196,6 +267,8 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
   const palette = ["#f0378a", "#a855f7", "#3fd8a4", "#f5b544", "#60a5fa", "#e11d48", "#22d3ee"];
   const ents = Object.entries(spend).map(([cid, amt]) => ({ label: (data.categories.find((c) => c.id === cid) && catName(data.categories.find((c) => c.id === cid))) || cid, amount: amt })).sort((a, b) => b.amount - a.amount);
   const totalSpend = ents.reduce((s, e) => s + e.amount, 0) || 1;
+  const purses = (data.streams || []).filter((s) => s.active);
+  const pursesTotal = purses.reduce((s, p) => s + p.balance, 0);
 
   const bank = (a, proj) => (
     <div className={"bankcard" + (proj ? " proj" : "")} onClick={() => go("accounts")}>
@@ -219,24 +292,37 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
     )}
     <div className="stats">
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
-      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
-      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
-      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
-      {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
+      {showBanks && <div className="stat" style={{ cursor: "pointer" }} onClick={() => go(can("accounts") ? "revenue" : "accounts")}><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
       <div className="stat"><div className="stat-ic" style={{ background: "rgba(245,181,68,.14)", color: "var(--amber)" }}><i className="ph ph-hourglass-medium" /></div><div className="stat-v mono">{pending.length}</div><div className="stat-l">Pending reimbursements</div><div className="stat-s dim">{fmt(pending.reduce((s, r) => s + r.amount, 0))} in progress</div></div>
     </div>
+    {purses.length > 0 && (
+      <div className="panel">
+        <h3 className="panel-t" style={{ marginBottom: 12 }}>Purses</h3>
+        <div style={{ display: "flex", height: 10, borderRadius: 6, overflow: "hidden", marginBottom: 14 }}>
+          {purses.map((s, i) => <div key={s.id} style={{ width: (s.balance / (pursesTotal || 1)) * 100 + "%", background: palette[i % palette.length] }} title={s.name} />)}
+        </div>
+        <div className="fx gap16" style={{ flexWrap: "wrap" }}>
+          {purses.map((s, i) => (
+            <div key={s.id} className="fx ac gap8" style={{ fontSize: 13 }}>
+              <span style={{ width: 11, height: 11, borderRadius: 3, background: palette[i % palette.length] }} />
+              <span className="th">{s.name}</span><span className="mono dim">{fmt(s.balance)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
     <div className="grid2">
       <div className="panel">
         <div className="fx ac jb" style={{ marginBottom: 16 }}><h3 className="panel-t">Reimbursement pipeline</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{data.requests.length} requests</span></div>
-        <div className="pipe">{ORDER.map((k) => <div key={k} className="pipe-cell"><div className="pipe-n" style={{ color: k === "disbursed" ? "var(--accent2)" : k === "closed" ? "var(--mut)" : "var(--txt)" }}>{data.requests.filter((r) => r.status === k).length}</div><div className="pipe-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div>
+        <div className="pipe">{ORDER.map((k) => <div key={k} className="pipe-cell" style={{ cursor: "pointer" }} onClick={() => { setReqFilter(k); go("requests"); }}><div className="pipe-n" style={{ color: k === "disbursed" ? "var(--accent2)" : k === "closed" ? "var(--mut)" : "var(--txt)" }}>{data.requests.filter((r) => r.status === k).length}</div><div className="pipe-l">{lang === "th" ? STATUS[k].th : STATUS[k].label}</div></div>)}</div>
       </div>
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 4 }}>Spending by category</h3>
         <p className="dim" style={{ fontSize: 12.5, margin: "0 0 14px" }}>Disbursed & completed reimbursements</p>
         {ents.length === 0 ? <div className="empty" style={{ padding: 30 }}><i className="ph ph-chart-donut" />No disbursed spending yet.</div> :
           ents.map((e, i) => (
-            <div key={e.label} className="fx ac gap10" style={{ padding: "7px 0", fontSize: 13 }}>
+            <div key={e.label} className="fx ac gap10" style={{ padding: "7px 0", fontSize: 13, cursor: "pointer" }} onClick={() => go(admin ? "categories" : "requests")}>
               <span style={{ width: 11, height: 11, borderRadius: 3, background: palette[i % palette.length], flex: "0 0 auto" }} />
               <span className="th" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{e.label}</span>
               <span className="mono" style={{ fontWeight: 700 }}>{fmt(e.amount)}</span>
@@ -248,7 +334,10 @@ function Dashboard({ me, data, can, admin, lang, catName, go, setModal, setForm 
     {(data.txns.length > 0) && (
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 8 }}>Recent transactions</h3>
-        {data.txns.slice(0, 6).map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} />)}
+        {data.txns.slice(0, 6).map((t) => {
+          const ref = parseNotificationRef(t.desc);
+          return <div key={t.id} onClick={ref && ref.kind === "request" ? () => go("detail", { detailId: ref.id }) : undefined} style={ref && ref.kind === "request" ? { cursor: "pointer" } : undefined}><TxnRow t={t} accounts={data.accounts} /></div>;
+        })}
       </div>
     )}
   </>);
