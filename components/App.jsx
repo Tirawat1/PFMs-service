@@ -403,7 +403,7 @@ function Requests({ data, can, lang, catName, catAlt, go, setModal, setForm, req
 }
 
 /* ---------- Projections ---------- */
-const PJ_LABEL = { submitted: "Submitted", advanced: "Advance issued", linked: "Linked to request", settled: "Settled" };
+const PJ_LABEL = { submitted: "Submitted", advanced: "Advance issued", linked: "Linked to request", settled: "Settled", rejected: "Rejected" };
 function Projections({ data, me, admin, can, catName, setModal, setForm, rpc }) {
   const list = data.projections || [];
   const canVerify = admin || can("verify");
@@ -425,9 +425,14 @@ function Projections({ data, me, admin, can, catName, setModal, setForm, rpc }) 
                 <td className="muted">{fmtDate(p.expectedDate)}</td>
                 <td><span className="badge st-notified">{PJ_LABEL[p.status] || p.status}</span></td>
                 <td>
-                  {p.status === "submitted" && canVerify && <button className="btn btn-primary grad btn-sm" onClick={() => rpc("approveProjection", { id: p.id }, "Advance issued.")}><i className="ph ph-check" /> Issue advance</button>}
+                  {p.status === "submitted" && canVerify && (
+                    <div className="fx gap8" style={{ flexWrap: "wrap" }}>
+                      <button className="btn btn-primary grad btn-sm" onClick={() => { setForm({ vendorRequired: c?.vendorRequired ?? false }); setModal({ type: "approveAdvance", id: p.id }); }}><i className="ph ph-check" /> Issue advance</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ reason: "" }); setModal({ type: "rejectProjection", id: p.id }); }}><i className="ph ph-x" /> Reject</button>
+                    </div>
+                  )}
                   {me.role.isMigrationOperator && <select className="input" style={{ marginTop: 6 }} value={p.status} onChange={(e) => rpc("setRecordStatus", { kind: "projection", id: p.id, status: e.target.value }, "Status updated.")}>
-                    {["submitted", "advanced", "linked", "settled"].map((s) => <option key={s} value={s}>{PJ_LABEL[s]}</option>)}
+                    {["submitted", "advanced", "linked", "settled", "rejected"].map((s) => <option key={s} value={s}>{PJ_LABEL[s]}</option>)}
                   </select>}
                 </td>
               </tr>
@@ -485,18 +490,19 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
           {[{ phase: "pre", label: "Pre-reimbursement documents", lockHint: "Locked after verification" }, { phase: "post", label: "Closing documents", lockHint: "Available once funds are disbursed" }].map(({ phase, label, lockHint }) => {
             const rows = r.docs.map((d, i) => ({ d, i })).filter(({ d }) => (d.phase || "pre") === phase);
             if (rows.length === 0) return null;
-            const locked = !isDocEditable({ phase, status: r.status });
+            const locked = !isDocEditable({ phase, status: r.status, admin });
             return (
               <div key={phase} style={{ marginBottom: 16 }}>
                 <div className="fx ac gap8" style={{ marginBottom: 9 }}>
                   <span className="label" style={{ margin: 0 }}>{label}</span>
                   {locked && <span className="dim" style={{ fontSize: 11 }}><i className="ph ph-lock-simple" /> {lockHint}</span>}
+                  {(admin || can("verify")) && <i className="ph ph-plus-circle chip-act" title="Add a required document" onClick={() => { setForm({ name: "" }); setModal({ type: "addReqDoc", reqId: r.id, phase }); }} />}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                   {rows.map(({ d, i }) => {
                     const disc = d.disc;
                     const example = c && c.docExamples && c.docExamples[d.name];
-                    const editable = isDocEditable({ phase: d.phase || "pre", status: r.status });
+                    const editable = isDocEditable({ phase: d.phase || "pre", status: r.status, admin });
                     return (
                       <div key={i} className={"doc" + (d.submitted ? " on" : "") + (disc && disc.open ? " flagged" : "")}>
                         <div className="chk"><i className="ph ph-check" /></div>
@@ -612,7 +618,14 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
             </div>
           </div>
         )}
-        {r.po && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-file-text" /> Purchase order {r.po.number}</div><div style={{ fontSize: 13 }}>{r.po.vendor} — {fmt(r.po.amount)}</div>{r.po.link && <a href={r.po.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View PO ↗</a>}</div>}
+        {!r.po && r.status === "verified" && <div className="drive-banner"><i className="ph ph-hourglass-medium" /><span>Verified — the Faculty Purchasing Officer will issue the purchase order and send it to the requester.</span></div>}
+        {r.po && (
+          <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}>
+            <div className="fx ac jb" style={{ marginBottom: 5 }}><div style={{ fontSize: 12, fontWeight: 800 }}><i className="ph ph-file-text" /> Purchase order {r.po.number}</div>{r.po.deliveredToId === me.id && <span className="tag">Issued to you</span>}</div>
+            <div style={{ fontSize: 13 }}>{r.po.vendor} — {fmt(r.po.amount)}</div>
+            {r.po.link && <a href={r.po.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View PO ↗</a>}
+          </div>
+        )}
         {r.payProof && <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)" }}><div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-receipt" /> Proof of payment</div><div style={{ fontSize: 13 }}>{r.payProof.ref} — {r.payProof.date}</div><a href={r.payProof.link} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>View slip ↗</a></div>}
         {r.depositPaid && <div className="drive-banner"><i className="ph ph-coins" /><span>Deposit of {fmt(r.depositAmount)} already paid — only the remaining balance will be deducted at disbursement.</span></div>}
         {canAdv && nextKey !== "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => rpc("advanceRequest", { id: r.id }, "Status updated.")}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
@@ -1035,7 +1048,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step", routeFunds: "Route funds to a purse" };
+  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step", routeFunds: "Route funds to a purse", approveAdvance: "Issue advance", rejectProjection: "Reject projected expense", addReqDoc: "Add a required document" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -1063,6 +1076,9 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "deleteTxn") ok = await rpc("deleteTransaction", { id: modal.txnId, reason: form.reason }, "Transaction deleted.");
     else if (modal.type === "reverseStep") ok = await rpc("reverseRequest", { id: modal.reqId, reason: form.reason }, "Request reversed to the previous step.");
     else if (modal.type === "routeFunds") ok = await rpc("routeFunds", { id: modal.reqId, streamId: form.streamId }, "Funds routed.");
+    else if (modal.type === "approveAdvance") ok = await rpc("approveProjection", { id: modal.id, vendorRequired: !!form.vendorRequired }, "Advance issued.");
+    else if (modal.type === "rejectProjection") ok = await rpc("rejectProjection", { id: modal.id, reason: form.reason }, "Projected expense rejected.");
+    else if (modal.type === "addReqDoc") ok = await rpc("addReqDoc", { id: modal.reqId, name: form.name, phase: modal.phase }, "Document added to checklist.");
     if (ok) close();
   };
 
@@ -1246,6 +1262,22 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Reason (optional)</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="Why is this being reversed?" /></div>
         </>)}
 
+        {modal.type === "approveAdvance" && (<>
+          <div className="fx ac jb" style={{ marginTop: 4, marginBottom: 4 }}>
+            <div><div style={{ fontWeight: 700, fontSize: 14 }}>Is a vendor required for this expense?</div><div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>Overrides the category default for the request eventually linked to this advance.</div></div>
+            <div className={"switch" + (form.vendorRequired ? " on" : "")} onClick={() => setForm({ ...form, vendorRequired: !form.vendorRequired })} />
+          </div>
+        </>)}
+
+        {modal.type === "addReqDoc" && (<>
+          <div className="field"><label className="label">Document name</label><input className="input" value={form.name || ""} onChange={set("name")} placeholder="e.g. Additional receipt for venue rental" /></div>
+          <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Added to this request's checklist only ({modal.phase === "post" ? "closing" : "pre-reimbursement"} documents) — the requester will be notified.</div>
+        </>)}
+
+        {modal.type === "rejectProjection" && (<>
+          <div className="field"><label className="label">Reason (optional)</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="Why is this being rejected?" /></div>
+        </>)}
+
         {modal.type === "routeFunds" && (<>
           <div className="attn"><i className="ph-fill ph-info" /><span>Transfers {fmt(modal.reqAmount)} from the Faculty account into the chosen purse — independent of the advance/projection flow.</span></div>
           <div className="field"><label className="label">Purse</label><select className="input" value={form.streamId || ""} onChange={set("streamId")}>{(data.streams || []).filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name} ({fmt(s.balance)})</option>)}</select></div>
@@ -1271,7 +1303,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
         </>)}
 
-        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim())) || (modal.type === "routeFunds" && !form.streamId)}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
+        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim())) || (modal.type === "routeFunds" && !form.streamId) || (modal.type === "addReqDoc" && !(form.name || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
       </div>
     </div>
   );

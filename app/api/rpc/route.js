@@ -81,10 +81,10 @@ export async function POST(req) {
         if (!title || !categoryId) return err("Fill title and category.");
         const cat = await prisma.category.findUnique({ where: { id: categoryId } });
         if (!cat || !cat.active) return err("Unknown category.");
-        const vendorCheck = validateVendorAtSubmission({ categoryVendorRequired: cat.vendorRequired, vendor });
-        if (vendorCheck.error) return err(vendorCheck.error);
         let proj = null;
         if (projectionId) proj = await prisma.projection.findUnique({ where: { id: projectionId } });
+        const vendorCheck = validateVendorAtSubmission({ categoryVendorRequired: (proj && typeof proj.vendorRequired === "boolean") ? proj.vendorRequired : cat.vendorRequired, vendor });
+        if (vendorCheck.error) return err(vendorCheck.error);
         const source = resolveRequestSource({
           projectionId, projectionStatus: proj?.status || null, categoryAllowDirect: cat.allowDirect,
         });
@@ -217,13 +217,30 @@ export async function POST(req) {
         const project = await prisma.account.findUnique({ where: { id: "project" } });
         if (!faculty || !project || !faculty.active || !project.active) return err("Faculty or Project account is unavailable.");
         if (faculty.balance < proj.amount) return err("Insufficient balance in Faculty account for this advance.");
+        const vendorRequired = typeof body.vendorRequired === "boolean" ? body.vendorRequired : projCat?.vendorRequired ?? false;
         const result = await approveProjectionTx(prisma, {
           id: proj.id, currentStatus: "submitted", amount: proj.amount,
           facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
         });
         if (result.conflict) return err("This projection was already advanced.");
+        await prisma.projection.update({ where: { id: proj.id }, data: { vendorRequired } });
         await audit(me, "Issued advance for projection " + proj.id + " (" + fmt(proj.amount) + ")");
         await notifyPerm("create", proj.id + " advance issued — " + fmt(proj.amount) + " transferred Faculty → Project.", "disbursed", me.id);
+        return NextResponse.json({ ok: true });
+      }
+      case "rejectProjection": {
+        if (!can(me, "verify") && !admin) return err("Forbidden", 403);
+        const proj = await prisma.projection.findUnique({ where: { id: body.id } });
+        if (!proj) return err("Not found", 404);
+        const projCat = await prisma.category.findUnique({ where: { id: proj.categoryId } });
+        if (!canApproveCategory({ admin, hasVerifyPerm: can(me, "verify"), roleApproverKey: me.role.approverKey, categoryApproverRole: projCat?.approverRole })) {
+          return err("This expense category is routed to another approver.");
+        }
+        const result = await prisma.projection.updateMany({ where: { id: proj.id, status: "submitted" }, data: { status: "rejected" } });
+        if (result.count === 0) return err("This projection cannot be rejected.");
+        const reason = (body.reason || "").trim();
+        await audit(me, "Rejected projection " + proj.id + (reason ? " — " + reason : ""));
+        await notifyUser(proj.requesterId, proj.id + " — projected expense rejected" + (reason ? ": " + reason : "") + ".", "notified");
         return NextResponse.json({ ok: true });
       }
       case "toggleCategoryDirect": {
@@ -325,6 +342,9 @@ export async function POST(req) {
           acctId, proofLink, streamId, payRoute: route, payee, payNote, actualAmount,
         });
         if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
+        if (next === "docs_submitted" && r.issueReason) {
+          await prisma.request.update({ where: { id: r.id }, data: { issueReason: "" } });
+        }
         if (next === "disbursed" && r.projectionId) {
           const proj = await prisma.projection.findUnique({ where: { id: r.projectionId } });
           if (proj && proj.status === "linked") {
@@ -410,7 +430,7 @@ export async function POST(req) {
         const amount = Number(body.amount) || r.amount;
         const counter = await prisma.counter.update({ where: { id: "po" }, data: { value: { increment: 1 } } });
         const number = "PO-" + counter.value;
-        const po = { number, vendor, amount, link: body.link || null, note: body.note || "", issuedAt: Date.now(), issuedBy: me.name };
+        const po = { number, vendor, amount, link: body.link || null, note: body.note || "", issuedAt: Date.now(), issuedBy: me.name, deliveredTo: r.requesterName, deliveredToId: r.requesterId };
         await prisma.request.update({ where: { id: r.id }, data: { po } });
         await audit(me, "Issued purchase order " + number + " for " + r.id + " to " + vendor);
         await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — purchase order " + number + " issued.", "notified");
@@ -428,6 +448,19 @@ export async function POST(req) {
       }
 
       // ---------- documents ----------
+      case "addReqDoc": {
+        if (!admin && !can(me, "verify")) return err("Forbidden", 403);
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        const name = (body.name || "").trim();
+        if (!name) return err("Enter a document name.");
+        const phase = body.phase === "post" ? "post" : "pre";
+        const docs = [...r.docs, { name, phase, submitted: false, link: null, fileName: null, disc: null }];
+        await prisma.request.update({ where: { id: r.id }, data: { docs } });
+        await audit(me, 'Added document "' + name + '" to ' + r.id);
+        await notifyUser(r.requesterId, r.id + ' — a new document "' + name + '" was added to your checklist.', "notified");
+        return NextResponse.json({ ok: true });
+      }
       case "attachDoc":
       case "detachDoc": {
         const r = await prisma.request.findUnique({ where: { id: body.id } });
@@ -436,7 +469,7 @@ export async function POST(req) {
         const docs = r.docs;
         const doc = docs[body.idx];
         if (!doc) return err("Unknown document.");
-        if (!isDocEditable({ phase: doc.phase, status: r.status })) {
+        if (!isDocEditable({ phase: doc.phase, status: r.status, admin })) {
           return err((doc.phase === "post" ? "Closing documents open once funds are disbursed." : "Pre-reimbursement documents are locked after verification."));
         }
         await saveUndo(me.id, (action === "attachDoc" ? "Submitted document \"" : "Detached document \"") + doc.name + "\" on " + r.id, r);
