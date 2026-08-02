@@ -504,6 +504,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         {canAdv && nextKey === "disbursed" && <button className="btn btn-primary grad" style={{ marginTop: "auto" }} onClick={() => { const defAcct = data.accounts.find((a) => a.id === c?.defaultAcctId && a.active); setForm({ acctId: defAcct ? defAcct.id : "", proofLink: "", route: "direct", payee: "", payNote: "", actualAmount: String(r.amount), streamId: "" }); setModal({ type: "disburse", reqId: r.id, depositPaid: r.depositPaid, depositAmount: r.depositAmount, reqAmount: r.amount, bank: r.bank }); }}><i className="ph ph-arrow-right" /> {ADV_LABELS[nextKey]}</button>}
         {!canAdv && nextKey && <div className="dim" style={{ fontSize: 12.5, textAlign: "center", padding: 10, border: "1px dashed var(--line2)", borderRadius: 11, marginTop: "auto" }}>Next step ({ADV_LABELS[nextKey]}) is handled by another role.</div>}
         {(admin || can("verify")) && ["docs_submitted", "verified"].includes(r.status) && <button className="btn btn-danger" style={{ flex: 1 }} onClick={() => { setForm({ reason: "" }); setModal({ type: "correction", reqId: r.id }); }}><i className="ph ph-arrow-u-up-left" /> Return for correction</button>}
+        {ci > 0 && (admin || can(ADV_PERM[r.status])) && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ reason: "" }); setModal({ type: "reverseStep", reqId: r.id, fromLabel: st.label, toLabel: STATUS[ORDER[ci - 1]].label, willRefund: r.status === "disbursed" }); }}><i className="ph ph-arrow-counter-clockwise" /> Reverse to previous step</button>}
       </div>
     </div>
   </>);
@@ -863,7 +864,7 @@ function Settings({ me, data, admin, rpc }) {
 function Modal({ ctx, modal, form, setForm, close }) {
   const { data, rpc, catName } = ctx;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account" };
+  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -889,6 +890,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "correction") ok = await rpc("returnForCorrection", { id: modal.reqId, reason: form.reason }, "Request returned for correction.");
     else if (modal.type === "editNumber") ok = await rpc("editRecordAmount", { kind: modal.kind, id: modal.id, field: modal.field, newValue: form.newValue, reason: form.reason }, "Correction saved.");
     else if (modal.type === "deleteTxn") ok = await rpc("deleteTransaction", { id: modal.txnId, reason: form.reason }, "Transaction deleted.");
+    else if (modal.type === "reverseStep") ok = await rpc("reverseRequest", { id: modal.reqId, reason: form.reason }, "Request reversed to the previous step.");
     if (ok) close();
   };
 
@@ -1065,6 +1067,11 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Requested {fmt(modal.reqAmount)}. If the actual invoice came in lower, enter the lower figure — the difference is returned to the Faculty account.</div>
           <div className="field"><label className="label">Transfer proof link</label><input className="input" value={form.proofLink || ""} onChange={set("proofLink")} placeholder="https://… (bank transfer slip / statement)" /></div>
           <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Funds will be deducted from this account immediately.</div>
+        </>)}
+
+        {modal.type === "reverseStep" && (<>
+          <div className="attn"><i className="ph-fill ph-warning" style={{ color: "var(--amber)" }} /><span>Reversing {modal.reqId} from <b>{modal.fromLabel}</b> back to <b>{modal.toLabel}</b>{modal.willRefund ? " — the disbursed funds (and any advance refund) will be returned." : "."}</span></div>
+          <div className="field"><label className="label">Reason (optional)</label><textarea className="input" style={{ minHeight: 70, resize: "vertical" }} value={form.reason || ""} onChange={set("reason")} placeholder="Why is this being reversed?" /></div>
         </>)}
 
         {modal.type === "bankInfo" && (<>

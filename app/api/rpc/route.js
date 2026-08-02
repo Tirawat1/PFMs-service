@@ -19,6 +19,7 @@ import { payDepositTx, remainingAfterDeposit } from "@/lib/deposit.mjs";
 import { canReturnForCorrection } from "@/lib/return-correction.mjs";
 import { checkTransitionGuards } from "@/lib/transition-guards.mjs";
 import { canEditRequest, mergeDocsForCategoryChange } from "@/lib/edit-request.mjs";
+import { reverseRequestTx } from "@/lib/reversal.mjs";
 import { editAmountTx, deleteTxnTx } from "@/lib/corrections.mjs";
 import { applyStatusOverride } from "@/lib/status-override.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
@@ -322,6 +323,29 @@ export async function POST(req) {
         await audit(me, "Advanced " + r.id + " to " + STATUS[next].label + (next === "disbursed" ? " from account " + acctName + " via " + route + (route === "selfpay" ? " to " + payee : "") : ""));
         await notifyUser(r.requesterId !== me.id ? r.requesterId : null, r.id + " — " + label + ".", next);
         await notifyPerm("disburse", r.id + " — " + label + ".", next, me.id);
+        return NextResponse.json({ ok: true });
+      }
+      case "reverseRequest": {
+        const r = await prisma.request.findUnique({ where: { id: body.id } });
+        if (!r) return err("Not found", 404);
+        const i = ORDER.indexOf(r.status);
+        if (i <= 0) return err("This request has no earlier step to reverse to.");
+        if (!admin && !can(me, ADV_PERM[r.status])) return err("Forbidden", 403);
+        const prevStatus = ORDER[i - 1];
+        let disbursedAmount = 0;
+        if (r.status === "disbursed") {
+          const paid = r.actualAmount != null ? r.actualAmount : r.amount;
+          const remaining = remainingAfterDeposit({ requestAmount: paid, depositAmount: r.depositAmount, depositPaid: r.depositPaid });
+          disbursedAmount = remaining.error ? paid : remaining.amount;
+        }
+        const result = await reverseRequestTx(prisma, {
+          id: r.id, currentStatus: r.status, prevStatus,
+          acctId: r.acctId, streamId: r.streamId, disbursedAmount, refundAmount: r.refundAmount || 0,
+          facultyAcctId: "faculty", projectAcctId: "project", projectionId: r.projectionId,
+        });
+        if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
+        await audit(me, "Reversed " + r.id + " from " + STATUS[r.status].label + " back to " + STATUS[prevStatus].label + " — " + (body.reason || "no reason given"));
+        await notifyUser(r.requesterId, r.id + " — reversed back to " + STATUS[prevStatus].label + " by " + me.name + (body.reason ? ": " + body.reason : "") + ".", "solved");
         return NextResponse.json({ ok: true });
       }
       case "payDeposit": {
