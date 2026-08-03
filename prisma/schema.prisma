@@ -99,7 +99,8 @@ model Request {
   migrated          Boolean  @default(false)
   issueReason       String   @default("") // set when an officer returns the whole request for correction — persists as a historical annotation
   desc              String   @default("")
-  driveFolder       String   @default("")
+  driveFolder       String   @default("") // link shown in the UI — either a real Drive folder's webViewLink, or a synthesized placeholder when Drive isn't configured
+  driveFolderId     String? // the real Drive folder id, when one was created; null when Drive is unconfigured or creation failed
   // docs: [{name, submitted, link, fileName,
   //          disc: {open, note, by, ts, fixed, fixedNote} | null}]
   docs              Json

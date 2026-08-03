@@ -22,6 +22,8 @@ import { canEditRequest, mergeDocsForCategoryChange } from "@/lib/edit-request.m
 import { reverseRequestTx } from "@/lib/reversal.mjs";
 import { buildRequestSnapshot } from "@/lib/undo.mjs";
 import { routeFundsTx } from "@/lib/route-funds.mjs";
+import { ensureRequestFolder } from "@/lib/drive.mjs";
+import { applyDocAttachment } from "@/lib/attach-doc.mjs";
 import { editAmountTx, deleteTxnTx } from "@/lib/corrections.mjs";
 import { applyStatusOverride } from "@/lib/status-override.mjs";
 import { syncToSheets } from "@/lib/sheets-backup.mjs";
@@ -95,6 +97,7 @@ export async function POST(req) {
           data: { value: { increment: 1 } },
         });
         const id = "RB-" + counter.value;
+        const folder = await ensureRequestFolder({ requestId: id, title });
         await prisma.request.create({
           data: {
             id, title, categoryId, amount: Number(amount) || 0,
@@ -105,7 +108,8 @@ export async function POST(req) {
               ...cat.docsPre.map((name) => ({ name, phase: "pre", submitted: false, link: null, fileName: null, disc: null })),
               ...cat.docsPost.map((name) => ({ name, phase: "post", submitted: false, link: null, fileName: null, disc: null })),
             ],
-            driveFolder: "https://drive.google.com/drive/folders/PFMS-" + id,
+            driveFolder: folder?.link || "https://drive.google.com/drive/folders/PFMS-" + id,
+            driveFolderId: folder?.id || null,
             projectionId: projectionId || null,
             directClaim: source.directClaim,
             paidVia: paidVia || cat.defaultPaidVia,
@@ -475,10 +479,8 @@ export async function POST(req) {
         await saveUndo(me.id, (action === "attachDoc" ? "Submitted document \"" : "Detached document \"") + doc.name + "\" on " + r.id, r);
         if (action === "attachDoc") {
           if (!body.link) return err("Paste a Google Drive link.");
-          doc.submitted = true;
-          doc.link = body.link.trim();
-          doc.fileName = body.fileName || null;
-          if (doc.disc && doc.disc.open) doc.disc.fixed = true;
+          const result = applyDocAttachment(docs, body.idx, { link: body.link.trim(), fileName: body.fileName });
+          if (result.error) return err(result.error);
           await audit(me, 'Submitted document "' + doc.name + '" for ' + r.id);
           await notifyPerm("verify", r.id + ' — document "' + doc.name + '" submitted (Google Drive).', "docs_submitted", me.id);
         } else {

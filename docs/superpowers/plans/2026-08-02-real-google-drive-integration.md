@@ -4,6 +4,9 @@ Not part of `docs/design_PFMS_feature.md` — the client mockup never had real D
 integration either (every "Drive link" there is a simulated placeholder), so there was
 nothing to port. This is genuinely new work, requested directly.
 
+**Status: implemented** (see Tasks below — all done). This doc is kept as the design
+record.
+
 ## Goal
 
 Replace the synthesized `driveFolder` placeholder string and paste-a-link-only document
@@ -15,16 +18,19 @@ blocking a mutation or throwing to the user.
 
 ## Architecture
 
-- **Reuse the existing OAuth2 credentials**, not a new service account. `lib/sheets-backup.mjs`
-  already authenticates via `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN`
-  for Sheets; the same refresh token can drive the Drive API too, provided it was issued
-  with the added scope `https://www.googleapis.com/auth/drive.file` (drive.file — the app
-  can only see/manage files *it* creates, not the whole Drive — the least-privilege scope
-  for this use case). **Setup note to call out in `step_deploy_explained.md`**: the refresh
-  token must be re-generated after adding this scope; the old one won't carry it.
-- **New env var**: `GOOGLE_DRIVE_PARENT_FOLDER_ID` — a folder (in a Shared Drive or the
-  service identity's own Drive) that all per-request folders are created under.
-- **`lib/drive.mjs`** (new) — mirrors the shape of `lib/sheets-backup.mjs`: a thin
+- **Reuses the existing OAuth2 refresh token**, not a new Service Account. A Service
+  Account was tried first but reversed: bare Service Accounts have no storage quota of
+  their own and generally can't create files in a normal personal/Workspace-less Drive
+  (that only works cleanly against a Shared Drive). The existing `GOOGLE_CLIENT_ID` /
+  `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` (already used by `lib/sheets-backup.mjs`)
+  work fine here too, as long as the refresh token was issued with the added scope
+  `https://www.googleapis.com/auth/drive.file` alongside the Sheets scope — **the refresh
+  token must be re-issued** (via OAuth Playground: re-authorize with both
+  `.../auth/spreadsheets` and `.../auth/drive.file` scopes checked, exchange for a new
+  refresh token, replace `GOOGLE_REFRESH_TOKEN` in `.env`).
+- **New env var**: `GOOGLE_DRIVE_PARENT_FOLDER_ID` — a folder (owned by whichever Google
+  account authorized that refresh token) that all per-request folders are created under.
+- **`lib/drive.mjs`** — mirrors the shape of `lib/sheets-backup.mjs`: a thin
   `defaultDriveClient(...)` builder plus exported functions that accept an injectable
   client for testing, so the Drive-API-calling code stays out of the pure logic:
 
@@ -49,7 +55,7 @@ blocking a mutation or throwing to the user.
     const creds = driveEnv(env);
     if (!creds) return null;
     try {
-      const drive = driveClient ?? defaultDriveClient(creds);
+      const drive = driveClient ?? defaultDriveClient({ clientId: creds.GOOGLE_CLIENT_ID, clientSecret: creds.GOOGLE_CLIENT_SECRET, refreshToken: creds.GOOGLE_REFRESH_TOKEN });
       const res = await drive.files.create({
         requestBody: {
           name: requestId + " — " + title,
@@ -71,10 +77,10 @@ blocking a mutation or throwing to the user.
     const creds = driveEnv(env);
     if (!creds || !folderId) return null;
     try {
-      const drive = driveClient ?? defaultDriveClient(creds);
+      const drive = driveClient ?? defaultDriveClient({ clientId: creds.GOOGLE_CLIENT_ID, clientSecret: creds.GOOGLE_CLIENT_SECRET, refreshToken: creds.GOOGLE_REFRESH_TOKEN });
       const res = await drive.files.create({
         requestBody: { name, parents: [folderId] },
-        media: { mimeType, body: bufferToStream(buffer) },
+        media: { mimeType, body: Readable.from(buffer) },
         fields: "id, webViewLink, name",
       });
       return { link: res.data.webViewLink, fileName: res.data.name };
@@ -85,10 +91,10 @@ blocking a mutation or throwing to the user.
   }
   ```
 
-  (`bufferToStream` — a small `stream.Readable.from(buffer)` helper; googleapis' `media.body`
-  wants a stream, not a raw buffer.)
+  (`Readable.from(buffer)` from `node:stream` — googleapis' `media.body` wants a stream,
+  not a raw buffer.)
 
-- **Schema**: add `Request.driveFolderId String?` — the real Drive folder id (`null` when
+- **Schema**: `Request.driveFolderId String?` — the real Drive folder id (`null` when
   Drive isn't configured or folder creation failed), kept alongside the existing
   `driveFolder` (which stays as the *link* shown in the UI — either the real
   `webViewLink` or today's synthesized placeholder, chosen by whichever `ensureRequestFolder`
@@ -105,25 +111,29 @@ blocking a mutation or throwing to the user.
   data: { ..., driveFolder, driveFolderId: folder?.id || null },
   ```
 
-- **New upload endpoint** — the existing `/api/rpc` route is JSON-only; a real file upload
-  needs `multipart/form-data`, so this is a new route, not an RPC action:
-  `app/api/drive/upload/route.js` (`POST`), reading a `FormData` body
-  (`requestId`, `idx`, `file`), authorizing the same way `attachDoc` does
-  (`canManageRequestDocs`), then:
-  1. Look up the request; if it has no `driveFolderId` (Drive wasn't configured at
-     creation, or creation failed), return an error telling the client to fall back to
-     the paste-a-link modal instead.
-  2. Call `uploadFileToFolder`; on `null` (failure), same fallback error.
-  3. On success, call the **same** doc-mutation logic `attachDoc` uses (extract that
-     doc-array mutation into a small shared helper so the two entry points can't drift)
-     with `link: result.link, fileName: result.fileName`.
+- **Shared doc-mutation helper (`lib/attach-doc.mjs`)** — `applyDocAttachment(docs, idx, { link, fileName })`
+  is the actual "mark this checklist document submitted" mutation, extracted so the
+  `attachDoc` RPC action and the new upload endpoint can't silently diverge on what
+  "submitted" means.
+
+- **Upload endpoint (`app/api/drive/upload/route.js`, `POST`)** — the existing `/api/rpc`
+  route is JSON-only; a real file upload needs `multipart/form-data`, so this is a new
+  route, not an RPC action. Reads a `FormData` body (`id`, `idx`, `file`), authorizes the
+  same way `attachDoc` does (`canManageRequestDocs` + `isDocEditable`), then:
+  1. If the request has no `driveFolderId` (Drive wasn't configured at creation, or
+     creation failed), respond `{ error: "FALLBACK_TO_LINK" }` (409) so the client falls
+     back to the paste-a-link modal instead of dead-ending the user.
+  2. Call `uploadFileToFolder`; on `null` (failure), same fallback response.
+  3. On success, call `applyDocAttachment`, persist, audit, and notify — mirroring
+     `attachDoc`'s side effects.
 
 - **UI (`components/App.jsx`)** — the "attach" modal gets a real file `<input type="file">`
-  alongside the existing paste-a-link field, shown only when `r.driveFolderId` is present
-  (i.e., Drive is actually wired up for this request); otherwise the modal looks exactly
-  as it does today. On file pick, `POST` a `FormData` to `/api/drive/upload` instead of
-  calling the `attachDoc` RPC action directly; on the endpoint's fallback error, show the
-  existing paste-a-link field so the user isn't stuck.
+  when `modal.driveFolderId` is present (passed in from `r.driveFolderId` when the modal
+  opens); otherwise it looks exactly as it does today. Picking a file `POST`s a
+  `FormData` to `/api/drive/upload`; on `FALLBACK_TO_LINK` the modal reveals the
+  paste-a-link fields (with a one-line explanation) instead of dead-ending. The generic
+  "Submit" button is hidden while the file-upload path is active, since the file input
+  itself submits on change.
 
 ## Global constraints
 
@@ -136,29 +146,29 @@ blocking a mutation or throwing to the user.
   able to attach documents via pasted links forever.
 - **Least-privilege scope** (`drive.file`, not full `drive`) — the app must not be able to
   read/write files it didn't create itself.
-- **No new secrets committed** — `GOOGLE_DRIVE_PARENT_FOLDER_ID` and the scope-updated
-  refresh token go in `.env` / deployment secrets only, `.env.example` gets the new key
-  name with an empty value plus a comment on the required scope.
+- **No new secrets committed** — the re-issued refresh token and parent folder id go in
+  `.env` / deployment secrets only; `.env.example` gets the new key name with an empty
+  value plus setup comments.
 - Reuse `lib/sheets-backup.mjs`'s pattern (injectable client for tests, `env` param
   instead of reading `process.env` directly inside test-covered functions) so
   `lib/drive.mjs` can be unit-tested the same way — fake `driveClient` objects, no real
   network calls in `tests/*.test.mjs`.
 
-## Tasks (not yet started)
+## Tasks
 
-1. `prisma/schema.prisma`: add `Request.driveFolderId String?`.
-2. `lib/drive.mjs` + `tests/drive.test.mjs` — `ensureRequestFolder`, `uploadFileToFolder`,
+1. ✅ `prisma/schema.prisma`: `Request.driveFolderId String?`.
+2. ✅ `lib/drive.mjs` + `tests/drive.test.mjs` — `ensureRequestFolder`, `uploadFileToFolder`,
    both covered with a fake `driveClient` (success, misconfigured-env, and thrown-error
    paths — asserting `null` is returned, never an exception).
-3. Wire `ensureRequestFolder` into the `createRequest` RPC case.
-4. `app/api/drive/upload/route.js` — multipart upload endpoint, reusing `attachDoc`'s
-   authorization + doc-mutation logic (extracted to a shared helper first so the two
-   entry points can't silently diverge).
-5. `components/App.jsx` — real file input in the attach-document modal, gated on
-   `r.driveFolderId`, falling back to the paste-a-link field on any upload error.
-6. `.env.example` — add `GOOGLE_DRIVE_PARENT_FOLDER_ID=` with a comment; note in
-   `step_deploy_explained.md` that the Sheets refresh token must be regenerated with the
-   `drive.file` scope added.
+3. ✅ Wired `ensureRequestFolder` into the `createRequest` RPC case.
+4. ✅ `lib/attach-doc.mjs` (`applyDocAttachment`) extracted and used by both `attachDoc`
+   and the new upload route.
+5. ✅ `app/api/drive/upload/route.js` — multipart upload endpoint.
+6. ✅ `components/App.jsx` — real file input in the attach-document modal, gated on
+   `driveFolderId`, falling back to the paste-a-link fields on any upload error.
+7. ✅ `.env.example` + `docker-compose.yml` — `GOOGLE_DRIVE_PARENT_FOLDER_ID` added with
+   a setup comment; note added above `GOOGLE_REFRESH_TOKEN` that it must carry the
+   `drive.file` scope too.
 
 ## Non-goals
 

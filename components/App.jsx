@@ -590,7 +590,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
                           {example && <a className="doc-view" href={example.link} target="_blank" rel="noreferrer"><i className="ph ph-lightbulb" /> Example</a>}
                           {disc && disc.open && <span className={"disc-tag " + (disc.fixed ? "fixed" : "open")}><i className={"ph " + (disc.fixed ? "ph-arrows-clockwise" : "ph-warning")} />{disc.fixed ? "Revised — recheck" : "Discrepancy"}</span>}
                           {d.submitted && d.link && <a className="doc-view" href={d.link} target="_blank" rel="noreferrer"><i className="ph ph-google-drive-logo" /> View</a>}
-                          {!d.submitted && editable && (isRequester || can("create") || admin) && <button className="doc-attach" onClick={() => { setForm({ link: "", fileName: "" }); setModal({ type: "attach", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-paperclip" /> Attach</button>}
+                          {!d.submitted && editable && (isRequester || can("create") || admin) && <button className="doc-attach" onClick={() => { setForm({ link: "", fileName: "" }); setModal({ type: "attach", reqId: r.id, idx: i, name: d.name, driveFolderId: r.driveFolderId }); }}><i className="ph ph-paperclip" /> Attach</button>}
                           {d.submitted && editable && (isRequester || can("create") || admin) && !(disc && disc.open) && <i className="ph ph-x doc-x" title="Remove" onClick={() => rpc("detachDoc", { id: r.id, idx: i })} />}
                           {canOfficer && d.submitted && !(disc && disc.open) && <button className="doc-attach warn" onClick={() => { setForm({ note: "" }); setModal({ type: "flagDisc", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-flag" /> Flag issue</button>}
                         </div>
@@ -1122,8 +1122,29 @@ function Settings({ me, data, admin, rpc }) {
 
 /* ---------- Modal ---------- */
 function Modal({ ctx, modal, form, setForm, close }) {
-  const { data, rpc, catName } = ctx;
+  const { data, rpc, catName, refresh, showToast } = ctx;
+  const [uploading, setUploading] = useState(false);
+  const [uploadFallback, setUploadFallback] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  const uploadFile = async (file) => {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("id", modal.reqId);
+      fd.append("idx", String(modal.idx));
+      fd.append("file", file);
+      const res = await fetch("/api/drive/upload", { method: "POST", body: fd });
+      const json = await res.json();
+      if (json.error === "FALLBACK_TO_LINK") { setUploadFallback(true); return; }
+      if (json.error) { showToast("⚠ " + json.error); return; }
+      await refresh();
+      showToast("Document uploaded.");
+      close();
+    } finally {
+      setUploading(false);
+    }
+  };
   const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step", routeFunds: "Route funds to a purse", approveAdvance: "Issue advance", rejectProjection: "Reject projected expense", addReqDoc: "Add a required document" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
@@ -1280,8 +1301,19 @@ function Modal({ ctx, modal, form, setForm, close }) {
 
         {modal.type === "attach" && (<>
           <div className="drive-banner" style={{ marginBottom: 18 }}><i className="ph ph-google-drive-logo" /><span className="th">Submitting — <b>{modal.name}</b></span></div>
-          <div className="field"><label className="label">Google Drive link</label><input className="input" value={form.link || ""} onChange={set("link")} placeholder="https://drive.google.com/file/d/…" /></div>
-          <div className="field"><label className="label">File name (optional)</label><input className="input" value={form.fileName || ""} onChange={set("fileName")} placeholder="receipt-2026-07.pdf" /></div>
+          {modal.driveFolderId && !uploadFallback && (
+            <div className="field">
+              <label className="label">Upload a file</label>
+              <input className="input" type="file" disabled={uploading} onChange={(e) => e.target.files[0] && uploadFile(e.target.files[0])} />
+              {uploading && <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}><i className="ph ph-spinner" /> Uploading to Google Drive…</div>}
+              <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>Or <a href="#" onClick={(e) => { e.preventDefault(); setUploadFallback(true); }} style={{ color: "#7cb3ff" }}>paste a link instead</a>.</div>
+            </div>
+          )}
+          {(!modal.driveFolderId || uploadFallback) && (<>
+            {uploadFallback && <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Upload didn't go through — paste a Drive link instead.</div>}
+            <div className="field"><label className="label">Google Drive link</label><input className="input" value={form.link || ""} onChange={set("link")} placeholder="https://drive.google.com/file/d/…" /></div>
+            <div className="field"><label className="label">File name (optional)</label><input className="input" value={form.fileName || ""} onChange={set("fileName")} placeholder="receipt-2026-07.pdf" /></div>
+          </>)}
         </>)}
 
         {modal.type === "flagDisc" && (<>
@@ -1379,7 +1411,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
         </>)}
 
-        <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim())) || (modal.type === "routeFunds" && !form.streamId) || (modal.type === "addReqDoc" && !(form.name || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>
+        {!(modal.type === "attach" && modal.driveFolderId && !uploadFallback) && <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim())) || (modal.type === "routeFunds" && !form.streamId) || (modal.type === "addReqDoc" && !(form.name || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>}
       </div>
     </div>
   );

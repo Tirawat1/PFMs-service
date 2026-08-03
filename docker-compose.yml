@@ -37,6 +37,7 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
       GOOGLE_SHEETS_BACKUP_ID: ${GOOGLE_SHEETS_BACKUP_ID:-}
+      GOOGLE_DRIVE_PARENT_FOLDER_ID: ${GOOGLE_DRIVE_PARENT_FOLDER_ID:-}
       CRON_SECRET: ${CRON_SECRET:-}
     ports:
       # bound to loopback only — nginx on the host is the public entrypoint
