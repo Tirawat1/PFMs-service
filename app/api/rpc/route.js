@@ -220,18 +220,14 @@ export async function POST(req) {
         }
         if (proj.status !== "submitted") return err("This projection cannot be approved.");
         const fundingAcctId = body.acctId || "faculty";
-        if (fundingAcctId === "project") return err("Cannot approve an advance from the Project account. Select a different funding source.");
         const funding = await prisma.account.findUnique({ where: { id: fundingAcctId } });
-        const project = await prisma.account.findUnique({ where: { id: "project" } });
-        if (!funding || !project || !funding.active || !project.active) return err("Selected funding or Project account is unavailable.");
-        if (funding.balance < proj.amount) return err("Insufficient balance in the selected funding account for this advance.");
+        if (!funding || !funding.active) return err("Selected funding account is unavailable.");
         const vendorRequired = typeof body.vendorRequired === "boolean" ? body.vendorRequired : projCat?.vendorRequired ?? false;
         const result = await approveProjectionTx(prisma, {
-          id: proj.id, currentStatus: "submitted", amount: proj.amount,
-          fundingAcctId, facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
+          id: proj.id, currentStatus: "submitted", fundingAcctId,
         });
         if (result.conflict) return err("This projection was already advanced.");
-        await prisma.projection.update({ where: { id: proj.id }, data: { vendorRequired, fundingAcctId } });
+        await prisma.projection.update({ where: { id: proj.id }, data: { vendorRequired } });
         await audit(me, "Issued advance for projection " + proj.id + " (" + fmt(proj.amount) + ") from account " + funding.id);
         await notifyPerm("create", proj.id + " advance issued — " + fmt(proj.amount) + " transferred " + funding.name + " → Project.", "disbursed", me.id);
         return NextResponse.json({ ok: true });
