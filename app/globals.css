@@ -55,7 +55,7 @@ select.input{appearance:auto}
 .iconbtn:hover{background:rgba(15,42,74,.08);color:var(--txt)}
 .dot{position:absolute;top:8px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--accent);border:2px solid var(--panel)}
 .avatar{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;font-weight:800;color:#fff;font-size:14px;flex:0 0 auto}
-.content{padding:30px;display:flex;flex-direction:column;gap:22px;max-width:1500px;width:100%}
+.content{padding:30px;display:flex;flex-direction:column;gap:22px;max-width:1500px;width:100%;margin:0 auto}
 .pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap}
 .h1{font-size:34px;font-weight:800;margin:0;line-height:1.1}
 .sub{color:var(--mut);font-size:14.5px;margin-top:7px;max-width:640px}
@@ -85,6 +85,11 @@ select.input{appearance:auto}
 .st-disbursed{background:var(--soft);color:var(--accent2)}
 .st-purchase_complete{background:rgba(15,157,107,.14);color:var(--green)}
 .st-closed{background:rgba(15,42,74,.07);color:var(--mut)}
+.st-submitted{background:rgba(245,181,68,.16);color:var(--amber)}
+.st-advanced{background:var(--soft);color:var(--accent2)}
+.st-linked{background:rgba(8,145,178,.14);color:#0e7490}
+.st-settled{background:rgba(15,157,107,.14);color:var(--green)}
+.st-rejected{background:rgba(220,38,38,.14);color:#dc2626}
 /* table */
 .tblwrap{overflow-x:auto}
 .tbl{width:100%;border-collapse:collapse;min-width:640px}

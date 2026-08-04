@@ -240,9 +240,9 @@ export async function POST(req) {
         if (!canApproveCategory({ admin, hasVerifyPerm: can(me, "verify"), roleApproverKey: me.role.approverKey, categoryApproverRole: projCat?.approverRole })) {
           return err("This expense category is routed to another approver.");
         }
-        const result = await prisma.projection.updateMany({ where: { id: proj.id, status: "submitted" }, data: { status: "rejected" } });
-        if (result.count === 0) return err("This projection cannot be rejected.");
         const reason = (body.reason || "").trim();
+        const result = await prisma.projection.updateMany({ where: { id: proj.id, status: "submitted" }, data: { status: "rejected", rejectReason: reason || null } });
+        if (result.count === 0) return err("This projection cannot be rejected.");
         await audit(me, "Rejected projection " + proj.id + (reason ? " — " + reason : ""));
         await notifyUser(proj.requesterId, proj.id + " — projected expense rejected" + (reason ? ": " + reason : "") + ".", "notified");
         return NextResponse.json({ ok: true });
@@ -560,8 +560,9 @@ export async function POST(req) {
         if (!body.name) return err("Enter a category name.");
         const docsPre = Array.isArray(body.docsPre) ? [...new Set(body.docsPre.filter((d) => typeof d === "string" && d.trim()))] : [];
         const docsPost = Array.isArray(body.docsPost) ? [...new Set(body.docsPost.filter((d) => typeof d === "string" && d.trim()))] : [];
+        const approverRole = ["faculty_finance", "faculty_purchasing"].includes(body.approverRole) ? body.approverRole : "faculty_finance";
         await prisma.category.create({
-          data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docsPre, docsPost, docExamples: {}, defaultAcctId: body.defaultAcctId || null },
+          data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docsPre, docsPost, docExamples: {}, defaultAcctId: body.defaultAcctId || null, approverRole },
         });
         await audit(me, "Created category " + body.name);
         return NextResponse.json({ ok: true });

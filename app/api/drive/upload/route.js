@@ -7,6 +7,7 @@ import { uploadFileToFolder } from "@/lib/drive.mjs";
 import { applyDocAttachment } from "@/lib/attach-doc.mjs";
 import { buildDriveFileName } from "@/lib/file-naming.mjs";
 import { sendMailToUser } from "@/lib/mail.js";
+import { ADV_PERM } from "@/lib/constants";
 
 function err(message, status = 400) {
   return NextResponse.json({ error: message }, { status });
@@ -33,9 +34,26 @@ export async function POST(req) {
   const admin = can(me, "*") || (me.role.perms || []).includes("*");
 
   const form = await req.formData();
+  const kind = form.get("kind") || "doc";
   const id = form.get("id");
-  const idx = Number(form.get("idx"));
   const file = form.get("file");
+
+  if (kind === "disburseProof") {
+    if (!id || !file) return err("Missing id or file.");
+    const r = await prisma.request.findUnique({ where: { id } });
+    if (!r) return err("Not found", 404);
+    if (!admin && !can(me, ADV_PERM.disbursed)) return err("Forbidden", 403);
+    if (!r.driveFolderId) return err("FALLBACK_TO_LINK", 409);
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const driveName = buildDriveFileName({ docName: "Transfer proof", date: new Date(), by: me.name, originalName: file.name });
+    const uploaded = await uploadFileToFolder({ folderId: r.driveFolderId, name: driveName, mimeType: file.type || "application/octet-stream", buffer });
+    if (!uploaded) return err("FALLBACK_TO_LINK", 409);
+
+    return NextResponse.json({ ok: true, link: uploaded.link, fileName: uploaded.fileName });
+  }
+
+  const idx = Number(form.get("idx"));
   if (!id || !Number.isInteger(idx) || !file) return err("Missing id, idx, or file.");
 
   const r = await prisma.request.findUnique({ where: { id } });

@@ -148,6 +148,7 @@ model Projection {
   amount        Float
   expectedDate  DateTime @default(now())
   status        String   @default("submitted") // submitted | advanced | linked | settled | rejected
+  rejectReason  String?
   migrated      Boolean  @default(false)
   requestId     String?
   vendorRequired Boolean? // set at approval time, overriding the category default for the request eventually linked to this projection
