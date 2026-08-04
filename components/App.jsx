@@ -699,17 +699,6 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
             {r.disburseProofLink && <a href={r.disburseProofLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: "var(--link)" }}>View transfer proof ↗</a>}
           </div>
         )}
-        {(admin || can("disburse")) && (
-          <div className="fx gap8" style={{ flexWrap: "wrap" }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ vendor: r.vendor || "", amount: String(r.amount), link: "", note: "" }); setModal({ type: "issuePO", reqId: r.id }); }}><i className="ph ph-file-text" /> {r.po ? "Re-issue PO" : "Issue PO"}</button>
-            {r.payProof ? (
-              <a className="btn btn-ghost btn-sm" href={r.payProof.link} target="_blank" rel="noreferrer"><i className="ph ph-receipt" /> View proof of payment</a>
-            ) : (
-              <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ link: "", ref: "", date: new Date().toISOString().slice(0, 10), note: "" }); setModal({ type: "proofPay", reqId: r.id }); }}><i className="ph ph-receipt" /> Attach proof of payment</button>
-            )}
-            {!r.depositPaid && r.status !== "closed" && <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ amount: "", streamId: data.streams?.[0]?.id || "" }); setModal({ type: "payDeposit", reqId: r.id }); }}><i className="ph ph-coins" /> Pay deposit</button>}
-          </div>
-        )}
         {admin && r.status === "verified" && !r.fundRoute && (
           <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ streamId: data.streams?.[0]?.id || "" }); setModal({ type: "routeFunds", reqId: r.id, reqAmount: r.amount }); }}><i className="ph ph-arrows-left-right" /> Route funds to a purse</button>
         )}
