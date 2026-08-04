@@ -38,7 +38,7 @@ export async function POST(req) {
   const id = form.get("id");
   const file = form.get("file");
 
-  if (kind === "disburseProof") {
+  if (kind === "disburseProof" || kind === "proofOfPayment") {
     if (!id || !file) return err("Missing id or file.");
     const r = await prisma.request.findUnique({ where: { id } });
     if (!r) return err("Not found", 404);
@@ -46,7 +46,8 @@ export async function POST(req) {
     if (!r.driveFolderId) return err("FALLBACK_TO_LINK", 409);
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const driveName = buildDriveFileName({ docName: "Transfer proof", date: new Date(), by: me.name, originalName: file.name });
+    const docName = kind === "disburseProof" ? "Transfer proof" : "Proof of payment";
+    const driveName = buildDriveFileName({ docName, date: new Date(), by: me.name, originalName: file.name });
     const uploaded = await uploadFileToFolder({ folderId: r.driveFolderId, name: driveName, mimeType: file.type || "application/octet-stream", buffer });
     if (!uploaded) return err("FALLBACK_TO_LINK", 409);
 

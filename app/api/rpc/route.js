@@ -92,9 +92,10 @@ export async function POST(req) {
         });
         if (source.error) return err(source.error);
         const parsedEventDate = eventDate ? new Date(eventDate) : new Date();
-        const counter = await prisma.counter.update({
+        const counter = await prisma.counter.upsert({
           where: { id: "request" },
-          data: { value: { increment: 1 } },
+          update: { value: { increment: 1 } },
+          create: { id: "request", value: 1001 },
         });
         const id = "RB-" + counter.value;
         const folder = await ensureRequestFolder({ requestId: id, title });
@@ -191,9 +192,10 @@ export async function POST(req) {
         if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return err("Enter a positive amount.");
         const cat = await prisma.category.findUnique({ where: { id: categoryId } });
         if (!cat || !cat.active) return err("Unknown category.");
-        const counter = await prisma.counter.update({
+        const counter = await prisma.counter.upsert({
           where: { id: "projection" },
-          data: { value: { increment: 1 } },
+          update: { value: { increment: 1 } },
+          create: { id: "projection", value: 2001 },
         });
         const id = "PJ-" + counter.value;
         await prisma.projection.create({
@@ -432,7 +434,7 @@ export async function POST(req) {
         const vendor = (body.vendor || r.vendor || "").trim();
         if (!vendor) return err("Enter the vendor name.");
         const amount = Number(body.amount) || r.amount;
-        const counter = await prisma.counter.update({ where: { id: "po" }, data: { value: { increment: 1 } } });
+        const counter = await prisma.counter.upsert({ where: { id: "po" }, update: { value: { increment: 1 } }, create: { id: "po", value: 1001 } });
         const number = "PO-" + counter.value;
         const po = { number, vendor, amount, link: body.link || null, note: body.note || "", issuedAt: Date.now(), issuedBy: me.name, deliveredTo: r.requesterName, deliveredToId: r.requesterId };
         await prisma.request.update({ where: { id: r.id }, data: { po } });
@@ -728,7 +730,7 @@ export async function POST(req) {
         const parsedAmount = Number(amount);
         if (!title) return err("Enter a title.");
         if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return err("Enter a positive amount.");
-        const counter = await prisma.counter.update({ where: { id: "revenue" }, data: { value: { increment: 1 } } });
+        const counter = await prisma.counter.upsert({ where: { id: "revenue" }, update: { value: { increment: 1 } }, create: { id: "revenue", value: 3001 } });
         const id = "RV-" + counter.value;
         await prisma.revenue.create({
           data: {
