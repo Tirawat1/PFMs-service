@@ -146,7 +146,7 @@ export default function App() {
             {data.undo && (
               <div className="drive-banner" style={{ marginBottom: 14 }}>
                 <i className="ph ph-arrow-counter-clockwise" />
-                <span style={{ flex: 1 }}>Your last action — {data.undo.action} · <a href="#" onClick={(e) => { e.preventDefault(); rpc("undoLast", {}, "Last action undone."); }} style={{ color: "#7cb3ff", fontWeight: 700 }}>Undo</a> / <a href="#" onClick={(e) => { e.preventDefault(); rpc("dismissUndo", {}); }} style={{ color: "var(--mut)" }}>Dismiss</a></span>
+                <span style={{ flex: 1 }}>Your last action — {data.undo.action} · <a href="#" onClick={(e) => { e.preventDefault(); rpc("undoLast", {}, "Last action undone."); }} style={{ color: "var(--link)", fontWeight: 700 }}>Undo</a> / <a href="#" onClick={(e) => { e.preventDefault(); rpc("dismissUndo", {}); }} style={{ color: "var(--mut)" }}>Dismiss</a></span>
               </div>
             )}
             {screen === "dashboard" && <Dashboard {...ctx} />}
@@ -232,15 +232,15 @@ function DeptDashboard({ me, data, can, catName, go, setModal, setForm }) {
     <div className="attn"><i className={"ph-fill " + attention.icon} style={{ color: flaggedCount > 0 ? "var(--amber)" : "var(--accent2)" }} /><span>{attention.text}</span></div>
     <div className="stats">
       <div className="stat"><div className="stat-ic" style={{ background: "rgba(124,58,237,.14)", color: "#7c3aed" }}><i className="ph ph-chart-line-up" /></div><div className="stat-v mono">{fmt(openProjectedTotal)}</div><div className="stat-l">Projected expenses</div><div className="stat-s dim">{myProjections.length} submitted</div></div>
-      <div className="stat"><div className="stat-ic" style={{ background: "rgba(245,181,68,.14)", color: "var(--amber)" }}><i className="ph ph-hourglass-medium" /></div><div className="stat-v mono">{fmt(inProgress.reduce((s, r) => s + r.amount, 0))}</div><div className="stat-l">Reimbursements in progress</div><div className="stat-s dim">{inProgress.length} requests</div></div>
-      <div className="stat"><div className="stat-ic" style={{ background: "rgba(8,145,178,.14)", color: "#0e7490" }}><i className="ph ph-files" /></div><div className="stat-v mono">{docsToSubmit}</div><div className="stat-l">Documents to submit now</div><div className="stat-s dim">across all your requests</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}><i className="ph ph-hourglass-medium" /></div><div className="stat-v mono">{fmt(inProgress.reduce((s, r) => s + r.amount, 0))}</div><div className="stat-l">Reimbursements in progress</div><div className="stat-s dim">{inProgress.length} requests</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "var(--cyan-soft)", color: "var(--cyan)" }}><i className="ph ph-files" /></div><div className="stat-v mono">{docsToSubmit}</div><div className="stat-l">Documents to submit now</div><div className="stat-s dim">across all your requests</div></div>
     </div>
     <div className="panel">
       <div className="fx ac jb" style={{ marginBottom: 14 }}><h3 className="panel-t">My projected expenses</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{myProjections.length}</span></div>
       {myProjections.length === 0 ? <div className="empty" style={{ padding: 26 }}><i className="ph ph-chart-line-up" />No projected expenses yet.</div> : (
         <div className="tblwrap"><table className="tbl"><thead><tr><th>Title</th><th>Amount</th><th>Expected date</th><th>Status</th></tr></thead><tbody>
           {myProjections.map((p) => (
-            <tr key={p.id} className="trow"><td><div className="tt">{p.title}</div><div className="tsub">{p.id}</div></td><td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}</td><td className="muted">{fmtDate(p.expectedDate)}</td><td><span className={"badge st-" + p.status}>{PJ_LABEL[p.status] || p.status}</span>{p.status === "rejected" && p.rejectReason && <div className="tsub" style={{ color: "#dc2626", marginTop: 3 }}>{p.rejectReason}</div>}</td></tr>
+            <tr key={p.id} className="trow"><td><div className="tt">{p.title}</div><div className="tsub">{p.id}</div></td><td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}</td><td className="muted">{fmtDate(p.expectedDate)}</td><td><span className={"badge st-" + p.status}>{PJ_LABEL[p.status] || p.status}</span>{p.status === "rejected" && p.rejectReason && <div className="tsub" style={{ color: "var(--red-deep)", marginTop: 3 }}>{p.rejectReason}</div>}</td></tr>
           ))}
         </tbody></table></div>
       )}
@@ -282,16 +282,25 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
   const activeAccts = accts.filter((a) => a.active);
   const totalBal = activeAccts.reduce((s, a) => s + a.balance, 0);
 
-  const inflow = data.txns.filter((t) => t.type === "in").reduce((s, t) => s + t.amount, 0);
-  const outflow = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
+  const inflow = data.txns.filter((t) => t.type === "in" && !t.internal).reduce((s, t) => s + t.amount, 0);
+  const outflow = data.txns.filter((t) => t.type === "out" && !t.internal).reduce((s, t) => s + t.amount, 0);
   const depts = [...new Set(data.requests.map((r) => r.dept).filter(Boolean))].sort();
   const scoped = dept ? data.requests.filter((r) => r.dept === dept) : data.requests;
-  const pending = scoped.filter((r) => r.status !== "closed");
+  const pending = scoped.filter((r) => !["disbursed", "purchase_complete", "closed"].includes(r.status));
+  const needsVerify = can("verify") ? data.requests.filter((r) => r.status === "docs_submitted").length : 0;
+  const needsDisburse = can("disburse") ? data.requests.filter((r) => r.status === "verified").length : 0;
+  const openDiscTotal = data.requests.reduce((s, r) => s + r.docs.filter((d) => d.disc && d.disc.open).length, 0);
+  const officerAttention = openDiscTotal > 0
+    ? { icon: "ph-warning", text: openDiscTotal + " document" + (openDiscTotal > 1 ? "s" : "") + " flagged with an open discrepancy." }
+    : needsVerify + needsDisburse > 0
+    ? { icon: "ph-hourglass-medium", text: [needsVerify > 0 && needsVerify + " waiting on verification", needsDisburse > 0 && needsDisburse + " waiting on disbursement"].filter(Boolean).join(" · ") }
+    : { icon: "ph-check-circle", text: "You're all caught up — nothing needs action right now." };
   const showBanks = accts.length > 0;
   const fac = accts.find((a) => a.id === "faculty"), prj = accts.find((a) => a.id === "project");
   const io = (id, type) => data.txns.filter((t) => t.acctId === id && t.type === type).reduce((s, t) => s + t.amount, 0);
+  const paidAmount = (r) => (r.actualAmount != null ? r.actualAmount : r.amount);
   const spend = {};
-  scoped.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { spend[r.categoryId] = (spend[r.categoryId] || 0) + r.amount; });
+  scoped.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { spend[r.categoryId] = (spend[r.categoryId] || 0) + paidAmount(r); });
   const palette = ["#f0378a", "#a855f7", "#3fd8a4", "#f5b544", "#60a5fa", "#e11d48", "#22d3ee"];
   const ents = Object.entries(spend).map(([cid, amt]) => ({ label: (data.categories.find((c) => c.id === cid) && catName(data.categories.find((c) => c.id === cid))) || cid, amount: amt })).sort((a, b) => b.amount - a.amount);
   const totalSpend = ents.reduce((s, e) => s + e.amount, 0) || 1;
@@ -299,11 +308,11 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
   const pursesTotal = purses.reduce((s, p) => s + p.balance, 0);
 
   const committed = pending.reduce((s, r) => s + r.amount, 0);
-  const spent = data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).reduce((s, r) => s + r.amount, 0);
+  const spent = data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).reduce((s, r) => s + paidAmount(r), 0);
   const coverageTotal = totalBal + committed + spent || 1;
 
   const deptSpend = {};
-  data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { deptSpend[r.dept] = (deptSpend[r.dept] || 0) + r.amount; });
+  data.requests.filter((r) => ["disbursed", "purchase_complete", "closed"].includes(r.status)).forEach((r) => { deptSpend[r.dept] = (deptSpend[r.dept] || 0) + paidAmount(r); });
   const deptEnts = Object.entries(deptSpend).map(([d, amt]) => ({ dept: d, amount: amt, count: data.requests.filter((r) => r.dept === d).length })).sort((a, b) => b.amount - a.amount);
   const deptTotal = deptEnts.reduce((s, e) => s + e.amount, 0) || 1;
 
@@ -318,7 +327,7 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
 
   const bank = (a, proj) => (
     <div className={"bankcard" + (proj ? " proj" : "")} onClick={() => go("accounts")}>
-      <div className="bank-top"><div className="bank-ic" style={{ background: proj ? "linear-gradient(135deg,#a855f7,#6d28d9)" : "linear-gradient(135deg,#f0378a,#b71e60)" }}><i className={"ph " + a.icon} /></div><div><div className="bank-l">{a.name}</div><div className="dim th" style={{ fontSize: 12 }}>{a.nameTh}</div></div></div>
+      <div className="bank-top"><div className="bank-ic" style={{ background: proj ? "linear-gradient(135deg,var(--purple),var(--purple-deep))" : "linear-gradient(135deg,#f0378a,#b71e60)" }}><i className={"ph " + a.icon} /></div><div><div className="bank-l">{a.name}</div><div className="dim th" style={{ fontSize: 12 }}>{a.nameTh}</div></div></div>
       <div><div className="bank-cap">Available balance</div><div className="bank-bal">{fmt(a.balance)}</div></div>
       <div className="bank-io"><div><div className="k">IN</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 14 }}>{fmt(io(a.id, "in"))}</div></div><div><div className="k">OUT</div><div className="mono neg" style={{ fontWeight: 800, fontSize: 14 }}>{fmt(io(a.id, "out"))}</div></div></div>
     </div>
@@ -332,6 +341,9 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
         {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: (data.categories.find((c) => c.active !== false && c.allowDirect) || data.categories.find((c) => c.active !== false))?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
       </div>
     </div>
+    {(can("verify") || can("disburse")) && (
+      <div className="attn pointer" onClick={() => go("requests")}><i className={"ph-fill " + officerAttention.icon} style={{ color: openDiscTotal > 0 ? "var(--amber)" : "var(--accent2)" }} /><span>{officerAttention.text}</span></div>
+    )}
     {showBanks && fac && prj && (
       <div className="bankgrid">
         {bank(fac, false)}
@@ -343,7 +355,7 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--accent2)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalBal)}</div><div className="stat-l">Total available balance</div><div className="stat-s dim">{activeAccts.length} accounts</div></div>}
       {showBanks && <div className="stat" style={{ cursor: "pointer" }} onClick={() => go(can("accounts") ? "revenue" : "accounts")}><div className="stat-ic" style={{ background: "rgba(15,157,107,.14)", color: "var(--green)" }}><i className="ph ph-arrow-down-left" /></div><div className="stat-v mono">{fmt(inflow)}</div><div className="stat-l">Total inflow</div><div className="stat-s pos">↑ received</div></div>}
       {showBanks && <div className="stat"><div className="stat-ic" style={{ background: "rgba(225,29,72,.12)", color: "#e11d48" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(outflow)}</div><div className="stat-l">Total outflow</div><div className="stat-s neg">↓ disbursed</div></div>}
-      <div className="stat"><div className="stat-ic" style={{ background: "rgba(245,181,68,.14)", color: "var(--amber)" }}><i className="ph ph-hourglass-medium" /></div><div className="stat-v mono">{pending.length}</div><div className="stat-l">Pending reimbursements</div><div className="stat-s dim">{fmt(pending.reduce((s, r) => s + r.amount, 0))} in progress</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}><i className="ph ph-hourglass-medium" /></div><div className="stat-v mono">{pending.length}</div><div className="stat-l">Pending reimbursements</div><div className="stat-s dim">{fmt(pending.reduce((s, r) => s + r.amount, 0))} in progress</div></div>
     </div>
     {purses.length > 0 && (
       <div className="panel">
@@ -365,13 +377,13 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
       <div className="panel">
         <h3 className="panel-t" style={{ marginBottom: 12 }}>Budget coverage</h3>
         <div style={{ display: "flex", height: 10, borderRadius: 6, overflow: "hidden", marginBottom: 14 }}>
-          <div style={{ width: (totalBal / coverageTotal) * 100 + "%", background: "#3fd8a4" }} title="Available" />
-          <div style={{ width: (committed / coverageTotal) * 100 + "%", background: "#f5b544" }} title="Committed" />
+          <div style={{ width: (totalBal / coverageTotal) * 100 + "%", background: "var(--teal)" }} title="Available" />
+          <div style={{ width: (committed / coverageTotal) * 100 + "%", background: "var(--gold)" }} title="Committed" />
           <div style={{ width: (spent / coverageTotal) * 100 + "%", background: "#e11d48" }} title="Spent" />
         </div>
         <div className="fx gap16" style={{ flexWrap: "wrap" }}>
-          <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "#3fd8a4" }} /><span className="th">Available</span><span className="mono dim">{fmt(totalBal)}</span></div>
-          <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "#f5b544" }} /><span className="th">Committed (pending)</span><span className="mono dim">{fmt(committed)}</span></div>
+          <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "var(--teal)" }} /><span className="th">Available</span><span className="mono dim">{fmt(totalBal)}</span></div>
+          <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "var(--gold)" }} /><span className="th">Committed (pending)</span><span className="mono dim">{fmt(committed)}</span></div>
           <div className="fx ac gap8" style={{ fontSize: 13 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "#e11d48" }} /><span className="th">Spent</span><span className="mono dim">{fmt(spent)}</span></div>
         </div>
       </div>
@@ -514,9 +526,9 @@ function Projections({ data, me, admin, can, catName, setModal, setForm, rpc }) 
               <tr key={p.id} className="trow">
                 <td><div className="tt">{p.title}</div><div className="tsub">{p.id} · {c ? catName(c) : "—"}</div></td>
                 <td className="muted">{p.dept}</td>
-                <td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: p.amount, reason: "" }); setModal({ type: "editNumber", kind: "projection", id: p.id, field: "amount", label: "Amount — " + p.id, orig: p.amount }); }} />}</td>
+                <td className="mono" style={{ fontWeight: 800 }}>{fmt(p.amount)}{admin && <button type="button" className="numedit" title="Correct amount" onClick={() => { setForm({ newValue: p.amount, reason: "" }); setModal({ type: "editNumber", kind: "projection", id: p.id, field: "amount", label: "Amount — " + p.id, orig: p.amount }); }}><i className="ph ph-pencil-simple" /></button>}</td>
                 <td className="muted">{fmtDate(p.expectedDate)}</td>
-                <td><span className={"badge st-" + p.status}>{PJ_LABEL[p.status] || p.status}</span>{p.status === "rejected" && p.rejectReason && <div className="tsub" style={{ color: "#dc2626", marginTop: 3 }}>{p.rejectReason}</div>}</td>
+                <td><span className={"badge st-" + p.status}>{PJ_LABEL[p.status] || p.status}</span>{p.status === "rejected" && p.rejectReason && <div className="tsub" style={{ color: "var(--red-deep)", marginTop: 3 }}>{p.rejectReason}</div>}</td>
                 <td>
                   {p.status === "submitted" && canVerify && (
                     <div className="fx gap8" style={{ flexWrap: "wrap" }}>
@@ -608,7 +620,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
                           {disc && disc.open && <span className={"disc-tag " + (disc.fixed ? "fixed" : "open")}><i className={"ph " + (disc.fixed ? "ph-arrows-clockwise" : "ph-warning")} />{disc.fixed ? "Revised — recheck" : "Discrepancy"}</span>}
                           {d.submitted && d.link && <a className="doc-view" href={d.link} target="_blank" rel="noreferrer"><i className="ph ph-google-drive-logo" /> View</a>}
                           {!d.submitted && editable && (isRequester || can("create") || admin) && <button className="doc-attach" onClick={() => { setForm({ link: "", fileName: "" }); setModal({ type: "attach", reqId: r.id, idx: i, name: d.name, driveFolderId: r.driveFolderId }); }}><i className="ph ph-paperclip" /> Attach</button>}
-                          {d.submitted && editable && (isRequester || can("create") || admin) && !(disc && disc.open) && <i className="ph ph-x doc-x" title="Remove" onClick={() => rpc("detachDoc", { id: r.id, idx: i })} />}
+                          {d.submitted && editable && (isRequester || can("create") || admin) && !(disc && disc.open) && <button type="button" className="icon-act doc-x" title="Remove" onClick={() => { if (window.confirm("Remove this submitted document? You'll need to resubmit it.")) rpc("detachDoc", { id: r.id, idx: i }); }}><i className="ph ph-x" /></button>}
                           {canOfficer && d.submitted && !(disc && disc.open) && <button className="doc-attach warn" onClick={() => { setForm({ note: "" }); setModal({ type: "flagDisc", reqId: r.id, idx: i, name: d.name }); }}><i className="ph ph-flag" /> Flag issue</button>}
                         </div>
                         {disc && disc.open && (
@@ -635,7 +647,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         <h3 className="panel-t">Details</h3>
         <div><div className="label" style={{ marginBottom: 5 }}>Category</div><div style={{ fontWeight: 700 }}>{c ? catName(c) : "—"}</div><div className="dim th" style={{ fontSize: 13 }}>{c ? catAlt(c) : ""}</div></div>
         <div className="fx gap16">
-          <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Amount</div><div className="mono" style={{ fontWeight: 800, fontSize: 22 }}>{fmt(r.amount)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: r.amount, reason: "" }); setModal({ type: "editNumber", kind: "request", id: r.id, field: "amount", label: "Amount — " + r.id, orig: r.amount }); }} />}</div></div>
+          <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Amount</div><div className="mono" style={{ fontWeight: 800, fontSize: 22 }}>{fmt(r.amount)}{admin && <button type="button" className="numedit" title="Correct amount" onClick={() => { setForm({ newValue: r.amount, reason: "" }); setModal({ type: "editNumber", kind: "request", id: r.id, field: "amount", label: "Amount — " + r.id, orig: r.amount }); }}><i className="ph ph-pencil-simple" /></button>}</div></div>
           <div style={{ flex: 1 }}><div className="label" style={{ marginBottom: 5 }}>Department</div><div style={{ fontWeight: 700 }}>{r.dept}</div></div>
         </div>
         <div className="fx gap16">
@@ -646,7 +658,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
         {c && (c.samples || []).length > 0 && (
           <div style={{ padding: "13px 15px", borderRadius: 12, background: "var(--panel2)", border: "1px solid var(--line2)" }}>
             <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 7 }}><i className="ph ph-lightbulb" /> Sample documents for this category</div>
-            {c.samples.map((s, i) => <a key={i} href={s.link} target="_blank" rel="noreferrer" style={{ display: "block", fontSize: 12.5, color: "#7cb3ff", marginTop: 3 }}>{s.name} ↗</a>)}
+            {c.samples.map((s, i) => <a key={i} href={s.link} target="_blank" rel="noreferrer" style={{ display: "block", fontSize: 12.5, color: "var(--link)", marginTop: 3 }}>{s.name} ↗</a>)}
           </div>
         )}
         {(isRequester || admin) && r.vendorExists == null && c?.vendorRequired && (
@@ -684,7 +696,7 @@ function Detail({ me, data, admin, can, lang, catName, catAlt, go, rpc, setModal
             <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 5 }}><i className="ph ph-bank" /> Disbursed from</div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{data.accounts.find((a) => a.id === r.acctId)?.name || r.acctId}{r.streamId && <span className="dim" style={{ fontWeight: 500 }}> — {data.streams?.find((s) => s.id === r.streamId)?.name || r.streamId}</span>}</div>
             <div className="dim" style={{ fontSize: 12.5 }}>{{ direct: "Direct to supplier", advance: "Settled from advance", selfpay: "Self-pay" + (r.payee ? " — " + r.payee : "") }[r.payRoute] || r.payRoute}{r.actualAmount != null && r.actualAmount !== r.amount && " · Actual paid " + fmt(r.actualAmount)}</div>
-            {r.disburseProofLink && <a href={r.disburseProofLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: "#7cb3ff" }}>View transfer proof ↗</a>}
+            {r.disburseProofLink && <a href={r.disburseProofLink} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, color: "var(--link)" }}>View transfer proof ↗</a>}
           </div>
         )}
         {(admin || can("disburse")) && (
@@ -788,8 +800,8 @@ function CatEdit({ data, go, rpc, catId }) {
               {examples[d]
                 ? <a className="chip-ex" href={examples[d].link} target="_blank" rel="noreferrer" title={examples[d].name || ""}><i className="ph ph-lightbulb" /> Example</a>
                 : <i className="ph ph-lightbulb chip-act" title="Add an example for this document" onClick={() => setExampleDraft({ ...exampleDraft, [d]: exampleDraft[d] === undefined ? "" : undefined })} />}
-              {examples[d] && <i className="ph ph-trash chip-act" title="Remove example" onClick={() => rpc("clearCatDocExample", { id: c.id, name: d })} />}
-              <i className="ph ph-x chip-act" title="Remove document" onClick={() => rpc("toggleCatDoc", { id: c.id, name: d, phase })} />
+              {examples[d] && <button type="button" className="icon-act chip-act" title="Remove example" onClick={() => { if (window.confirm("Remove this example for \"" + d + "\"?")) rpc("clearCatDocExample", { id: c.id, name: d }); }}><i className="ph ph-trash" /></button>}
+              <button type="button" className="icon-act chip-act" title="Remove document" onClick={() => { if (window.confirm("Remove \"" + d + "\" from this checklist?")) rpc("toggleCatDoc", { id: c.id, name: d, phase }); }}><i className="ph ph-x" /></button>
             </div>
           ))}</div>}
         {Object.keys(exampleDraft).filter((d) => exampleDraft[d] !== undefined && list.includes(d)).map((d) => (
@@ -837,8 +849,8 @@ function CatEdit({ data, go, rpc, catId }) {
           <p className="dim" style={{ fontSize: 12.5, margin: "0 0 10px" }}>Reference files shown on every request in this category — "here's what a correct submission looks like."</p>
           {(c.samples || []).map((s, i) => (
             <div key={i} className="fx ac gap8" style={{ padding: "6px 0" }}>
-              <a href={s.link} target="_blank" rel="noreferrer" className="th" style={{ flex: 1, fontSize: 13, color: "#7cb3ff" }}>{s.name}</a>
-              <i className="ph ph-trash chip-act" onClick={() => rpc("removeCategorySample", { id: c.id, idx: i })} />
+              <a href={s.link} target="_blank" rel="noreferrer" className="th" style={{ flex: 1, fontSize: 13, color: "var(--link)" }}>{s.name}</a>
+              <button type="button" className="icon-act chip-act" title="Remove sample" onClick={() => { if (window.confirm("Remove this sample document?")) rpc("removeCategorySample", { id: c.id, idx: i }); }}><i className="ph ph-trash" /></button>
             </div>
           ))}
           <div className="fx gap8" style={{ marginTop: 8 }}>
@@ -870,7 +882,7 @@ function CatEdit({ data, go, rpc, catId }) {
 /* ---------- Accounts ---------- */
 function Accounts({ data, admin, rpc, setModal, setForm }) {
   const [txnSearch, setTxnSearch] = useState("");
-  const totalSpent = data.txns.filter((t) => t.type === "out").reduce((s, t) => s + t.amount, 0);
+  const totalSpent = data.txns.filter((t) => t.type === "out" && !t.internal).reduce((s, t) => s + t.amount, 0);
   const totalRemaining = data.accounts.filter((a) => a.active).reduce((s, a) => s + a.balance, 0);
   const matchesSearch = (t) => {
     const q = txnSearch.trim().toLowerCase();
@@ -884,8 +896,8 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
       {admin && <button className="btn btn-primary grad" onClick={() => { setForm({ name: "", nameTh: "", icon: "ph-bank" }); setModal({ type: "newAccount" }); }}><i className="ph ph-plus" /> New account</button>}
     </div>
     <div className="stats">
-      <div className="stat"><div className="stat-ic" style={{ background: "rgba(255,107,154,.14)", color: "#ff6b9a" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(totalSpent)}</div><div className="stat-l">Total spent</div><div className="stat-s dim">disbursed reimbursements</div></div>
-      <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "#ff8bb5" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalRemaining)}</div><div className="stat-l">Total remaining</div><div className="stat-s dim">across active accounts</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "var(--rose-soft)", color: "var(--rose)" }}><i className="ph ph-arrow-up-right" /></div><div className="stat-v mono">{fmt(totalSpent)}</div><div className="stat-l">Total spent</div><div className="stat-s dim">disbursed reimbursements</div></div>
+      <div className="stat"><div className="stat-ic" style={{ background: "var(--soft)", color: "var(--rose-light)" }}><i className="ph ph-vault" /></div><div className="stat-v mono">{fmt(totalRemaining)}</div><div className="stat-l">Total remaining</div><div className="stat-s dim">across active accounts</div></div>
     </div>
     <div className="grid2">
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -911,7 +923,7 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
                 )}
               </div>
               <div className="fx" style={{ marginTop: 16, gap: 12, flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: 120, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>BALANCE</div><div className="mono" style={{ fontWeight: 800, fontSize: 20 }}>{fmt(a.balance)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: a.balance, reason: "" }); setModal({ type: "editNumber", kind: "account", id: a.id, field: "balance", label: "Balance — " + a.name, orig: a.balance }); }} />}</div></div>
+                <div style={{ flex: 1, minWidth: 120, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>BALANCE</div><div className="mono" style={{ fontWeight: 800, fontSize: 20 }}>{fmt(a.balance)}{admin && <button type="button" className="numedit" title="Correct balance" onClick={() => { setForm({ newValue: a.balance, reason: "" }); setModal({ type: "editNumber", kind: "account", id: a.id, field: "balance", label: "Balance — " + a.name, orig: a.balance }); }}><i className="ph ph-pencil-simple" /></button>}</div></div>
                 <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>IN</div><div className="mono pos" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(inf)}</div></div>
                 <div style={{ flex: 1, minWidth: 100, background: "var(--panel2)", borderRadius: 12, padding: "12px 14px" }}><div className="dim" style={{ fontSize: 11.5, fontWeight: 700 }}>OUT</div><div className="mono neg" style={{ fontWeight: 800, fontSize: 16 }}>{fmt(outf)}</div></div>
               </div>
@@ -930,7 +942,7 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
                           <div key={s.id} className="purse">
                             <span className="purse-dot" style={{ background: s.color }} />
                             <span style={{ fontWeight: 700 }}>{s.name}</span>
-                            <span className="mono dim" style={{ fontWeight: 800 }}>{fmt(s.balance)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: s.balance, reason: "" }); setModal({ type: "editNumber", kind: "stream", id: s.id, field: "balance", label: "Purse — " + s.name, orig: s.balance }); }} />}</span>
+                            <span className="mono dim" style={{ fontWeight: 800 }}>{fmt(s.balance)}{admin && <button type="button" className="numedit" title="Correct balance" onClick={() => { setForm({ newValue: s.balance, reason: "" }); setModal({ type: "editNumber", kind: "stream", id: s.id, field: "balance", label: "Purse — " + s.name, orig: s.balance }); }}><i className="ph ph-pencil-simple" /></button>}</span>
                           </div>
                         ))}
                       </div>
@@ -976,17 +988,6 @@ function Revenue({ data, me, admin, can, setModal, setForm, rpc }) {
       <div><h1 className="h1 dsp">Projected <span className="gradt">Revenue</span></h1><p className="sub">Who is paying us, how much, when — and which purse each payment goes into.</p></div>
       {canManage && <button className="btn btn-primary grad" onClick={() => { setForm({ title: "", source: "", amount: "", expectedDate: new Date().toISOString().slice(0, 10), streamId: data.streams?.[0]?.id || "" }); setModal({ type: "newRevenue" }); }}><i className="ph ph-plus" /> Projected revenue</button>}
     </div>
-    {(data.streams || []).filter((s) => s.active).length > 0 && (
-      <div className="fx gap8" style={{ flexWrap: "wrap", marginBottom: 4 }}>
-        {data.streams.filter((s) => s.active).map((s) => (
-          <div key={s.id} className="purse">
-            <span className="purse-dot" style={{ background: s.color }} />
-            <span style={{ fontWeight: 700 }}>{s.name}</span>
-            <span className="mono dim" style={{ fontWeight: 800 }}>{fmt(s.balance)}</span>
-          </div>
-        ))}
-      </div>
-    )}
     <div className="panel" style={{ padding: "8px 8px 4px" }}>
       {list.length === 0 ? <div className="empty"><i className="ph ph-trend-up" />No projected revenue yet.</div> : (
         <div className="tblwrap"><table className="tbl"><thead><tr><th>Title</th><th>Source</th><th>Purse</th><th>Amount</th><th>Expected date</th><th>Status</th><th /></tr></thead><tbody>
@@ -995,7 +996,7 @@ function Revenue({ data, me, admin, can, setModal, setForm, rpc }) {
               <td><div className="tt">{rv.title}</div><div className="tsub">{rv.id}</div></td>
               <td className="muted">{rv.source || "—"}</td>
               <td className="muted">{rv.streamId ? streamName(rv.streamId) : "—"}</td>
-              <td className="mono" style={{ fontWeight: 800 }}>{fmt(rv.amount)}{admin && <i className="ph ph-pencil-simple numedit" onClick={() => { setForm({ newValue: rv.amount, reason: "" }); setModal({ type: "editNumber", kind: "revenue", id: rv.id, field: "amount", label: "Amount — " + rv.id, orig: rv.amount }); }} />}</td>
+              <td className="mono" style={{ fontWeight: 800 }}>{fmt(rv.amount)}{admin && <button type="button" className="numedit" title="Correct amount" onClick={() => { setForm({ newValue: rv.amount, reason: "" }); setModal({ type: "editNumber", kind: "revenue", id: rv.id, field: "amount", label: "Amount — " + rv.id, orig: rv.amount }); }}><i className="ph ph-pencil-simple" /></button>}</td>
               <td className="muted">{fmtDate(rv.expectedDate)}</td>
               <td><span className={"badge " + (rv.status === "received" ? "st-closed" : "st-notified")}>{RV_LABEL[rv.status] || rv.status}</span></td>
               <td>
@@ -1027,7 +1028,7 @@ function Users({ me, admin, data, rpc, setModal, setForm }) {
             <td>{u.role?.name || "—"}</td>
             <td className="muted">{u.dept}</td>
             <td className="muted" style={{ fontSize: 12.5 }}>{u.emailNotify && u.email ? u.email : "off"}</td>
-            <td>{u.id !== me.id && <i className="ph ph-trash dim rowlink" style={{ fontSize: 17 }} onClick={() => rpc("deleteUser", { id: u.id }, "User removed.")} />}</td>
+            <td>{u.id !== me.id && <button type="button" className="icon-act dim" style={{ fontSize: 17 }} title="Remove user" onClick={() => { if (window.confirm("Remove user \"" + u.name + "\"? They will lose access immediately.")) rpc("deleteUser", { id: u.id }, "User removed."); }}><i className="ph ph-trash" /></button>}</td>
           </tr>
         ))}
       </tbody></table></div>
@@ -1036,7 +1037,7 @@ function Users({ me, admin, data, rpc, setModal, setForm }) {
     <div className="grid3">
       {data.roles.map((r) => (
         <div key={r.id} className="panel" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div className="fx ac jb"><div style={{ fontWeight: 800, fontSize: 15 }}>{r.name}</div>{!r.system && <i className="ph ph-trash dim rowlink" onClick={() => rpc("deleteRole", { id: r.id }, "Role removed.")} />}</div>
+          <div className="fx ac jb"><div style={{ fontWeight: 800, fontSize: 15 }}>{r.name}</div>{!r.system && <button type="button" className="icon-act dim" title="Remove role" onClick={() => { if (window.confirm("Remove role \"" + r.name + "\"? Anyone assigned it will lose these permissions.")) rpc("deleteRole", { id: r.id }, "Role removed."); }}><i className="ph ph-trash" /></button>}</div>
           <div className="dim th" style={{ fontSize: 12.5 }}>{r.nameTh}</div>
           <div className="chipwrap">{((r.perms || []).includes("*") ? ["full access"] : r.perms).map((p) => <span key={p} className="doc-chip" style={{ padding: "4px 9px", fontSize: 11.5 }}>{p}</span>)}</div>
           <span className="mig-chip pointer" style={admin ? {} : { opacity: 0.6, cursor: "default" }} onClick={() => admin && rpc("toggleRoleAdvDash", { id: r.id })}><i className={r.canSeeAdvances ? "ph-fill ph-chart-line-up" : "ph ph-chart-line-up"} /> Sees Projected Expenses: {r.canSeeAdvances ? "on" : "off"}</span>
@@ -1068,7 +1069,7 @@ function DocMenu({ data, rpc }) {
         <div key={m.id} className={"doc-chip" + (m.vendorDoc ? " has-ex" : "")} style={{ padding: "9px 13px" }}>
           <span className="th">{m.name}</span>
           <span className="chip-act" title="Vendor doc" onClick={() => rpc("toggleMasterDocVendor", { id: m.id })}><i className={m.vendorDoc ? "ph-fill ph-storefront" : "ph ph-storefront"} /></span>
-          <i className="ph ph-x" onClick={() => rpc("removeMasterDoc", { name: m.name })} />
+          <button type="button" className="icon-act" title="Remove from master list" onClick={() => { if (window.confirm("Remove \"" + m.name + "\" from the master document list? Categories already using it keep it on their checklist.")) rpc("removeMasterDoc", { name: m.name }); }}><i className="ph ph-x" /></button>
         </div>
       ))}</div>
     </div>
@@ -1471,7 +1472,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
               <label className="label">Upload a file</label>
               <input className="input" type="file" disabled={uploading} onChange={(e) => e.target.files[0] && uploadFile(e.target.files[0])} />
               {uploading && <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}><i className="ph ph-spinner" /> Uploading to Google Drive…</div>}
-              <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>Or <a href="#" onClick={(e) => { e.preventDefault(); setUploadFallback(true); }} style={{ color: "#7cb3ff" }}>paste a link instead</a>.</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>Or <a href="#" onClick={(e) => { e.preventDefault(); setUploadFallback(true); }} style={{ color: "var(--link)" }}>paste a link instead</a>.</div>
             </div>
           )}
           {(!modal.driveFolderId || uploadFallback) && (<>
@@ -1517,7 +1518,9 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Source account</label><select className="input" value={form.acctId || ""} onChange={set("acctId")}>
             <option value="" disabled>Select an account…</option>
             {data.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select></div>
+          </select>
+          {!form.acctId && <div className="err" style={{ marginTop: 6 }}><i className="ph ph-warning-circle" /> Select a source account before disbursing.</div>}
+          </div>
           {(data.streams || []).filter((s) => s.active && s.acctId === form.acctId).length > 0 && (
             <div className="field"><label className="label">Purse</label><select className="input" value={form.streamId || ""} onChange={set("streamId")}>
               <option value="">No purse — debit account directly</option>
@@ -1525,20 +1528,24 @@ function Modal({ ctx, modal, form, setForm, close }) {
             </select></div>
           )}
           <div className="field"><label className="label">Actual amount paid</label><input className="input mono" type="number" value={form.actualAmount ?? ""} onChange={set("actualAmount")} placeholder={String(modal.reqAmount || 0)} /></div>
-          <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Requested {fmt(modal.reqAmount)}. If the actual invoice came in lower, enter the lower figure — the difference is returned to the Faculty account.</div>
+          <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>Requested {fmt(modal.reqAmount)}. If the actual invoice came in lower, enter the lower figure — the difference is returned to the Faculty account.</div>
+          {!(Number(form.actualAmount) > 0) && <div className="err" style={{ marginBottom: 10 }}><i className="ph ph-warning-circle" /> Enter a valid amount paid.</div>}
+          {Number(form.actualAmount) > 0 && Number(form.actualAmount) > (modal.reqAmount || 0) && <div className="err" style={{ marginBottom: 10 }}><i className="ph ph-warning-circle" /> Actual amount can't exceed the requested {fmt(modal.reqAmount)}.</div>}
+          {form.route === "selfpay" && !((form.payee || "").trim() && (form.payNote || "").trim()) && <div className="err" style={{ marginBottom: 10 }}><i className="ph ph-warning-circle" /> Payee and note are both required for a self-pay disbursement.</div>}
           <div className="field">
             <label className="label">Transfer proof</label>
             {modal.driveFolderId && !uploadFallback ? (<>
               {form.proofLink ? (
-                <div className="fx ac gap8"><a href={form.proofLink} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: "#7cb3ff" }}>View uploaded proof ↗</a><i className="ph ph-x chip-act" onClick={() => setForm({ ...form, proofLink: "" })} /></div>
+                <div className="fx ac gap8"><a href={form.proofLink} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: "var(--link)" }}>View uploaded proof ↗</a><i className="ph ph-x chip-act" onClick={() => setForm({ ...form, proofLink: "" })} /></div>
               ) : (<>
                 <input className="input" type="file" disabled={uploading} onChange={(e) => e.target.files[0] && uploadProofFile(e.target.files[0])} />
                 {uploading && <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}><i className="ph ph-spinner" /> Uploading to Google Drive…</div>}
               </>)}
-              <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>Uploads into the same Drive folder as this request's documents. Or <a href="#" onClick={(e) => { e.preventDefault(); setUploadFallback(true); }} style={{ color: "#7cb3ff" }}>paste a link instead</a>.</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>Uploads into the same Drive folder as this request's documents. Or <a href="#" onClick={(e) => { e.preventDefault(); setUploadFallback(true); }} style={{ color: "var(--link)" }}>paste a link instead</a>.</div>
             </>) : (
               <input className="input" value={form.proofLink || ""} onChange={set("proofLink")} placeholder="https://… (bank transfer slip / statement)" />
             )}
+            {!(form.proofLink || "").trim() && <div className="err" style={{ marginTop: 6 }}><i className="ph ph-warning-circle" /> Attach transfer proof before disbursing.</div>}
           </div>
           <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>Funds will be deducted from this account immediately.</div>
         </>)}

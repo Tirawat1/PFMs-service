@@ -835,6 +835,12 @@ export async function POST(req) {
         const finders = { account: prisma.account, stream: prisma.stream, request: prisma.request, projection: prisma.projection, revenue: prisma.revenue };
         const record = await finders[kind].findUnique({ where: { id } });
         if (!record) return err("Not found", 404);
+        if (field === "amount" && kind === "revenue" && record.status === "received") {
+          return err("This revenue was already received — the account was credited for the old amount. Adjust the account balance instead.");
+        }
+        if (field === "amount" && kind === "projection" && record.status !== "submitted") {
+          return err("This projected expense was already advanced — the transfer already moved the old amount. Adjust the account balance instead.");
+        }
         const oldValue = record[field];
         if (newValue === oldValue) return err("The amount is unchanged.");
         await editAmountTx(prisma, { kind, id, field, newValue });
