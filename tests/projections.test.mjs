@@ -58,6 +58,20 @@ test("a stale approve (status already moved on) is rejected as a conflict, not d
   assert.equal(prisma.state.txns.length, 0);
 });
 
+test("approving a projection can debit a selected funding account instead of the faculty account", async () => {
+  const prisma = makeFakePrisma({ status: "submitted", balances: { faculty: 5000, project: 1000, personal: 800 } });
+  const result = await approveProjectionTx(prisma, {
+    id: "PJ-2000", currentStatus: "submitted", amount: 300,
+    fundingAcctId: "personal", projectAcctId: "project", title: "Hotel",
+  });
+  assert.equal(result.conflict, false);
+  assert.equal(prisma.state.status, "advanced");
+  assert.equal(prisma.state.balances.personal, 500);
+  assert.equal(prisma.state.balances.project, 1300);
+  assert.equal(prisma.state.txns[0].acctId, "personal");
+  assert.equal(prisma.state.txns[0].type, "out");
+});
+
 test("two concurrent approvals only apply once", async () => {
   const prisma = makeFakePrisma({ status: "submitted", balances: { faculty: 5000, project: 1000 } });
   const args = { id: "PJ-2000", currentStatus: "submitted", amount: 300, facultyAcctId: "faculty", projectAcctId: "project", title: "Hotel" };

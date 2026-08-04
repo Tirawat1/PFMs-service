@@ -34,6 +34,7 @@ function makeFakePrisma({ status, balances, streamBalances, projections }) {
           },
         },
         projection: {
+          findUnique: async ({ where }) => ({ id: where.id, fundingAcctId: state.balances.personal ? "personal" : null }),
           updateMany: async ({ where, data }) => {
             if (state.projections[where.id] !== where.status) return { count: 0 };
             state.projections[where.id] = data.status;
@@ -77,6 +78,17 @@ test("reversing out of disbursed also undoes a Faculty advance-return refund", a
   });
   assert.equal(prisma.state.balances.project, 700 + 750 + 250);
   assert.equal(prisma.state.balances.faculty, 5250 - 250);
+});
+
+test("reversing out of disbursed uses the projection's funding account for the refund unwind", async () => {
+  const prisma = makeFakePrisma({ status: "disbursed", balances: { project: 700, personal: 5250 }, projections: { "PJ-1": "settled" } });
+  await reverseRequestTx(prisma, {
+    id: "RB-1", currentStatus: "disbursed", prevStatus: "verified",
+    acctId: "project", streamId: null, disbursedAmount: 750, refundAmount: 250,
+    facultyAcctId: "faculty", projectAcctId: "project", projectionId: "PJ-1",
+  });
+  assert.equal(prisma.state.balances.project, 700 + 750 + 250);
+  assert.equal(prisma.state.balances.personal, 5250 - 250);
 });
 
 test("reversing out of verified clears an issued PO", async () => {

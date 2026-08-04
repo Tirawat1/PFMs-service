@@ -8,16 +8,16 @@ generator client {
 }
 
 model Role {
-  id      String  @id @default(cuid())
-  name    String
-  nameTh  String  @default("")
-  perms   Json // array of permission keys, or ["*"] for admin
-  contact String  @default("")
-  system  Boolean @default(false)
-  canSeeAdvances Boolean @default(false)
-  approverKey String? // faculty_finance | faculty_purchasing | null — which category approver track this role represents, if any
+  id                  String  @id @default(cuid())
+  name                String
+  nameTh              String  @default("")
+  perms               Json // array of permission keys, or ["*"] for admin
+  contact             String  @default("")
+  system              Boolean @default(false)
+  canSeeAdvances      Boolean @default(false)
+  approverKey         String? // faculty_finance | faculty_purchasing | null — which category approver track this role represents, if any
   isMigrationOperator Boolean @default(false) // may force a record's status directly, bypassing the normal workflow — for importing historical data
-  users   User[]
+  users               User[]
 }
 
 model User {
@@ -34,22 +34,22 @@ model User {
 }
 
 model Category {
-  id            String  @id @default(cuid())
-  name          String
-  nameTh        String  @default("")
-  icon          String  @default("ph-tag")
+  id                    String  @id @default(cuid())
+  name                  String
+  nameTh                String  @default("")
+  icon                  String  @default("ph-tag")
   docsPre               Json    @default("[]") // document names required before disbursement
   docsPost              Json    @default("[]") // document names required to close the request, after disbursement
   docExamples           Json    @default("{}") // { [docName]: { link, name } } — an example file shown beside that checklist item
   samples               Json    @default("[]") // [{name, link}] — category-level "what a correct submission looks like" reference files
   requireCompletionDocs Boolean @default(true) // whether docsPost must be submitted before the request can reach "closed"
-  notes         String  @default("")
-  defaultAcctId String?
-  active        Boolean @default(true) // soft-close, never hard-delete — existing requests still reference categoryId
-  allowDirect   Boolean @default(false) // may be reimbursed without a projected-expense advance
-  vendorRequired Boolean @default(false) // this category always involves an external supplier — vendor name is mandatory at submission
-  defaultPaidVia String @default("finance") // finance | purchasing | psat — who typically processes this category's payments
-  approverRole   String @default("faculty_finance") // faculty_finance | faculty_purchasing — which approver track verifies this category
+  notes                 String  @default("")
+  defaultAcctId         String?
+  active                Boolean @default(true) // soft-close, never hard-delete — existing requests still reference categoryId
+  allowDirect           Boolean @default(false) // may be reimbursed without a projected-expense advance
+  vendorRequired        Boolean @default(false) // this category always involves an external supplier — vendor name is mandatory at submission
+  defaultPaidVia        String  @default("finance") // finance | purchasing | psat — who typically processes this category's payments
+  approverRole          String  @default("faculty_finance") // faculty_finance | faculty_purchasing — which approver track verifies this category
 }
 
 model MasterDoc {
@@ -85,6 +85,11 @@ model Txn {
   amount   Float
   desc     String
   date     DateTime @default(now())
+  // True for money moved between the faculty's own accounts (advance transfers, fund
+  // routing, advance refunds) rather than real external in/outflow (disbursement to a
+  // vendor/requester, a deposit paid out, revenue received, admin add/withdraw). Total
+  // spent/inflow/outflow stats exclude internal txns so they reflect real cash movement.
+  internal Boolean  @default(false)
 }
 
 model Request {
@@ -139,20 +144,21 @@ model UndoLog {
 }
 
 model Projection {
-  id            String   @id // e.g. PJ-2000
-  title         String
-  categoryId    String
-  dept          String
-  requesterId   String?
-  requesterName String
-  amount        Float
-  expectedDate  DateTime @default(now())
-  status        String   @default("submitted") // submitted | advanced | linked | settled | rejected
-  rejectReason  String?
-  migrated      Boolean  @default(false)
-  requestId     String?
+  id             String   @id // e.g. PJ-2000
+  title          String
+  categoryId     String
+  dept           String
+  requesterId    String?
+  requesterName  String
+  amount         Float
+  expectedDate   DateTime @default(now())
+  status         String   @default("submitted") // submitted | advanced | linked | settled | rejected
+  rejectReason   String?
+  migrated       Boolean  @default(false)
+  requestId      String?
   vendorRequired Boolean? // set at approval time, overriding the category default for the request eventually linked to this projection
-  createdAt     DateTime @default(now())
+  fundingAcctId  String? // source account used when the projection advance was issued
+  createdAt      DateTime @default(now())
 }
 
 model Revenue {

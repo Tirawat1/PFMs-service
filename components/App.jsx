@@ -1272,7 +1272,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "deleteTxn") ok = await rpc("deleteTransaction", { id: modal.txnId, reason: form.reason }, "Transaction deleted.");
     else if (modal.type === "reverseStep") ok = await rpc("reverseRequest", { id: modal.reqId, reason: form.reason }, "Request reversed to the previous step.");
     else if (modal.type === "routeFunds") ok = await rpc("routeFunds", { id: modal.reqId, streamId: form.streamId }, "Funds routed.");
-    else if (modal.type === "approveAdvance") ok = await rpc("approveProjection", { id: modal.id, vendorRequired: !!form.vendorRequired }, "Advance issued.");
+    else if (modal.type === "approveAdvance") ok = await rpc("approveProjection", { id: modal.id, acctId: form.acctId, vendorRequired: !!form.vendorRequired }, "Advance issued.");
     else if (modal.type === "rejectProjection") ok = await rpc("rejectProjection", { id: modal.id, reason: form.reason }, "Projected expense rejected.");
     else if (modal.type === "addReqDoc") ok = await rpc("addReqDoc", { id: modal.reqId, name: form.name, phase: modal.phase }, "Document added to checklist.");
     if (ok) close();
@@ -1556,6 +1556,13 @@ function Modal({ ctx, modal, form, setForm, close }) {
         </>)}
 
         {modal.type === "approveAdvance" && (<>
+          <div className="field">
+            <label className="label">Funding account</label>
+            <select className="input" value={form.acctId || "faculty"} onChange={set("acctId")}>
+              {data.accounts.filter((a) => a.active).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>The advance will be funded from this account, and any later refund will return to it.</div>
+          </div>
           <div className="fx ac jb" style={{ marginTop: 4, marginBottom: 4 }}>
             <div><div style={{ fontWeight: 700, fontSize: 14 }}>Is a vendor required for this expense?</div><div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>Overrides the category default for the request eventually linked to this advance.</div></div>
             <div className={"switch" + (form.vendorRequired ? " on" : "")} onClick={() => setForm({ ...form, vendorRequired: !form.vendorRequired })} />

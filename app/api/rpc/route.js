@@ -219,19 +219,20 @@ export async function POST(req) {
           return err("This expense category is routed to another approver.");
         }
         if (proj.status !== "submitted") return err("This projection cannot be approved.");
-        const faculty = await prisma.account.findUnique({ where: { id: "faculty" } });
+        const fundingAcctId = body.acctId || "faculty";
+        const funding = await prisma.account.findUnique({ where: { id: fundingAcctId } });
         const project = await prisma.account.findUnique({ where: { id: "project" } });
-        if (!faculty || !project || !faculty.active || !project.active) return err("Faculty or Project account is unavailable.");
-        if (faculty.balance < proj.amount) return err("Insufficient balance in Faculty account for this advance.");
+        if (!funding || !project || !funding.active || !project.active) return err("Selected funding or Project account is unavailable.");
+        if (funding.balance < proj.amount) return err("Insufficient balance in the selected funding account for this advance.");
         const vendorRequired = typeof body.vendorRequired === "boolean" ? body.vendorRequired : projCat?.vendorRequired ?? false;
         const result = await approveProjectionTx(prisma, {
           id: proj.id, currentStatus: "submitted", amount: proj.amount,
-          facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
+          fundingAcctId, facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
         });
         if (result.conflict) return err("This projection was already advanced.");
-        await prisma.projection.update({ where: { id: proj.id }, data: { vendorRequired } });
-        await audit(me, "Issued advance for projection " + proj.id + " (" + fmt(proj.amount) + ")");
-        await notifyPerm("create", proj.id + " advance issued — " + fmt(proj.amount) + " transferred Faculty → Project.", "disbursed", me.id);
+        await prisma.projection.update({ where: { id: proj.id }, data: { vendorRequired, fundingAcctId } });
+        await audit(me, "Issued advance for projection " + proj.id + " (" + fmt(proj.amount) + ") from account " + funding.id);
+        await notifyPerm("create", proj.id + " advance issued — " + fmt(proj.amount) + " transferred " + funding.name + " → Project.", "disbursed", me.id);
         return NextResponse.json({ ok: true });
       }
       case "rejectProjection": {
@@ -356,7 +357,7 @@ export async function POST(req) {
           if (proj && proj.status === "linked") {
             const settle = await settleProjectionTx(prisma, {
               id: proj.id, currentStatus: "linked", advancedAmount: proj.amount, actualAmount,
-              facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
+              fundingAcctId: proj.fundingAcctId || undefined, facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
             });
             if (!settle.conflict && settle.refund > 0) {
               await prisma.request.update({ where: { id: r.id }, data: { refundAmount: settle.refund } });
@@ -383,10 +384,15 @@ export async function POST(req) {
           const remaining = remainingAfterDeposit({ requestAmount: paid, depositAmount: r.depositAmount, depositPaid: r.depositPaid });
           disbursedAmount = remaining.error ? paid : remaining.amount;
         }
+        let refundAcctId = null;
+        if (r.projectionId) {
+          const proj = await prisma.projection.findUnique({ where: { id: r.projectionId } });
+          refundAcctId = proj?.fundingAcctId || null;
+        }
         const result = await reverseRequestTx(prisma, {
           id: r.id, currentStatus: r.status, prevStatus,
           acctId: r.acctId, streamId: r.streamId, disbursedAmount, refundAmount: r.refundAmount || 0,
-          facultyAcctId: "faculty", projectAcctId: "project", projectionId: r.projectionId,
+          facultyAcctId: "faculty", refundAcctId, projectAcctId: "project", projectionId: r.projectionId,
         });
         if (result.conflict) return err("This request was just updated by someone else — please refresh and try again.", 409);
         await audit(me, "Reversed " + r.id + " from " + STATUS[r.status].label + " back to " + STATUS[prevStatus].label + " — " + (body.reason || "no reason given"));
