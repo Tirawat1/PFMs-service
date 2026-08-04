@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ORDER, STATUS, PERMKEYS, ADV_LABELS, ADV_PERM } from "@/lib/constants";
 import { isDocEditable } from "@/lib/doc-phase.mjs";
 import { parseNotificationRef } from "@/lib/notification-ref.mjs";
@@ -43,7 +43,7 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [reqFilter, setReqFilter] = useState("all");
 
-  const showToast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 2800); }, []);
+  const showToast = useCallback((msg, isError) => { setToast({ msg, isError: !!isError }); setTimeout(() => setToast(null), isError ? 5000 : 2800); }, []);
 
   const refresh = useCallback(async () => {
     const d = await fetch("/api/data").then((r) => r.json());
@@ -61,12 +61,25 @@ export default function App() {
   const admin = perms.includes("*");
   const can = (k) => admin || perms.includes(k);
 
+  const [busy, setBusy] = useState(false);
+  const rpcBusy = useRef(false);
+
+  // Synchronous ref-lock, checked before any await — blocks a second click that
+  // lands before the first request's response (and re-render) come back.
   const rpc = useCallback(async (action, payload, okMsg) => {
-    const r = await post("/api/rpc", { action, ...payload });
-    if (r.error) { showToast("⚠ " + r.error); return false; }
-    await refresh();
-    if (okMsg) showToast(okMsg);
-    return r;
+    if (rpcBusy.current) return false;
+    rpcBusy.current = true;
+    setBusy(true);
+    try {
+      const r = await post("/api/rpc", { action, ...payload });
+      if (r.error) { showToast(r.error, true); return false; }
+      await refresh();
+      if (okMsg) showToast(okMsg);
+      return r;
+    } finally {
+      rpcBusy.current = false;
+      setBusy(false);
+    }
   }, [refresh, showToast]);
 
   const go = (s, extra = {}) => { setScreen(s); setDetailId(extra.detailId || null); setCatId(extra.catId || null); setNavOpen(false); };
@@ -83,7 +96,7 @@ export default function App() {
     : (n.perm === "*" ? admin : can(n.perm)));
   const titleMap = { dashboard: "Dashboard", requests: "Reimbursements", detail: "Request detail", projections: "Projected Expenses", categories: "Expense Categories", catedit: "Edit category", accounts: "Accounts", revenue: "Revenue", users: "Users & Roles", docmenu: "Document Menu", audit: "Audit Trail", notifs: "Notifications", settings: "Settings" };
 
-  const ctx = { me, data, admin, can, lang, catName, catAlt, go, rpc, setModal, setForm, showToast, reqFilter, setReqFilter, detailId, catId, refresh };
+  const ctx = { me, data, admin, can, lang, catName, catAlt, go, rpc, setModal, setForm, showToast, reqFilter, setReqFilter, detailId, catId, refresh, busy };
 
   return (
     <div className="app">
@@ -153,7 +166,7 @@ export default function App() {
         </div>
       </div>
       {modal && <Modal ctx={ctx} modal={modal} form={form} setForm={setForm} close={() => { setModal(null); setForm({}); }} />}
-      {toast && <div className="toast"><i className="ph ph-check-circle" style={{ color: "var(--green)", fontSize: 20 }} /> {toast}</div>}
+      {toast && <div className="toast">{toast.isError ? <i className="ph ph-warning-circle" style={{ color: "var(--red, #e11d48)", fontSize: 20 }} /> : <i className="ph ph-check-circle" style={{ color: "var(--green)", fontSize: 20 }} />} {toast.msg}</div>}
     </div>
   );
 }
@@ -214,7 +227,7 @@ function DeptDashboard({ me, data, can, catName, go, setModal, setForm }) {
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">My <span className="gradt">Overview</span></h1><p className="sub">Your projected expenses and reimbursements, {me.dept}.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: (data.categories.find((c) => c.active !== false && c.allowDirect) || data.categories.find((c) => c.active !== false))?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
     </div>
     <div className="attn"><i className={"ph-fill " + attention.icon} style={{ color: flaggedCount > 0 ? "var(--amber)" : "var(--accent2)" }} /><span>{attention.text}</span></div>
     <div className="stats">
@@ -316,7 +329,7 @@ function FinDashboard({ me, data, can, admin, lang, catName, go, setModal, setFo
       <div><h1 className="h1 dsp">Financial <span className="gradt">Overview</span></h1><p className="sub">Money across accounts, reimbursement progress, and disbursement activity.</p></div>
       <div className="fx ac gap12">
         {depts.length > 1 && <select className="input" style={{ width: "auto" }} value={dept} onChange={(e) => setDept(e.target.value)}><option value="">All departments</option>{depts.map((d) => <option key={d} value={d}>{d}</option>)}</select>}
-        {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
+        {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: (data.categories.find((c) => c.active !== false && c.allowDirect) || data.categories.find((c) => c.active !== false))?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New reimbursement</button>}
       </div>
     </div>
     {showBanks && fac && prj && (
@@ -439,8 +452,8 @@ function TxnRow({ t, accounts, onEdit, onDelete }) {
       <div className="acct-ic" style={{ width: 34, height: 34, fontSize: 15, background: isIn ? "rgba(15,157,107,.14)" : "rgba(225,29,72,.12)", color: isIn ? "var(--green)" : "#e11d48" }}><i className={"ph " + (isIn ? "ph-arrow-down-left" : "ph-arrow-up-right")} /></div>
       <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc}</div><div className="dim" style={{ fontSize: 11 }}>{acc ? acc.name : t.acctId} · {fmtDate(t.date)}</div></div>
       <div className={"mono " + (isIn ? "pos" : "neg")} style={{ fontWeight: 800, fontSize: 13.5 }}>{(isIn ? "+" : "−") + fmt(t.amount)}</div>
-      {onEdit && <i className="ph ph-pencil-simple numedit" onClick={() => onEdit(t)} />}
-      {onDelete && <i className="ph ph-trash numedit" onClick={() => onDelete(t)} />}
+      {onEdit && <button className="btn btn-ghost btn-sm" title="Correct amount" onClick={() => onEdit(t)}><i className="ph ph-pencil-simple" /> Correct</button>}
+      {onDelete && <button className="btn btn-ghost btn-sm" title="Delete transaction" onClick={() => onDelete(t)}><i className="ph ph-trash" /> Delete</button>}
     </div>
   );
 }
@@ -452,7 +465,7 @@ function Requests({ data, can, lang, catName, catAlt, go, setModal, setForm, req
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Reimbursements</h1><p className="sub">Track each request from document submission to fund disbursement.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New request</button>}
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: (data.categories.find((c) => c.active !== false && c.allowDirect) || data.categories.find((c) => c.active !== false))?.id, amount: "", eventDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newRequest" }); }}><i className="ph ph-plus" /> New request</button>}
     </div>
     <div className="seg">{filters.map((f) => <button key={f.k} className={reqFilter === f.k ? "on" : ""} onClick={() => setReqFilter(f.k)}>{f.l}</button>)}</div>
     <div className="panel" style={{ padding: "8px 8px 4px" }}>
@@ -486,7 +499,7 @@ function Projections({ data, me, admin, can, catName, setModal, setForm, rpc }) 
   return (<>
     <div className="pagehead">
       <div><h1 className="h1 dsp">Projected <span className="gradt">Expenses</span></h1><p className="sub">Submit an expected cost before spending, and get an advance from Faculty to Project once approved.</p></div>
-      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: data.categories.find((c) => c.active !== false)?.id, amount: "", expectedDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newProjection" }); }}><i className="ph ph-plus" /> Submit projection</button>}
+      {can("create") && <button className="btn btn-primary grad" onClick={() => { setForm({ categoryId: (data.categories.find((c) => c.active !== false && c.allowDirect) || data.categories.find((c) => c.active !== false))?.id, amount: "", expectedDate: new Date().toISOString().slice(0, 10) }); setModal({ type: "newProjection" }); }}><i className="ph ph-plus" /> Submit projection</button>}
     </div>
     <div className="panel" style={{ padding: "8px 8px 4px" }}>
       {list.length === 0 ? <div className="empty"><i className="ph ph-chart-line-up" />No projected expenses yet.</div> : (
@@ -728,6 +741,7 @@ function Categories({ data, admin, catName, catAlt, go, setModal, setForm, rpc }
           <div><div style={{ fontWeight: 800, fontSize: 15.5 }}>{catName(c)}{c.active === false && <span className="dim" style={{ fontSize: 11.5, marginLeft: 8 }}>(closed)</span>}</div><div className="dim th" style={{ fontSize: 13, marginTop: 2 }}>{catAlt(c)}</div></div>
           {c.notes && <div className="dim th" style={{ fontSize: 12, lineHeight: 1.4, borderTop: "1px solid var(--line)", paddingTop: 10 }}><i className="ph ph-info" style={{ color: "var(--accent2)" }} /> {c.notes}</div>}
           {admin && c.active !== false && <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); rpc("closeCategory", { id: c.id }, "Category closed."); }}><i className="ph ph-x" /> Close</button>}
+          {admin && c.active === false && <button className="btn btn-danger btn-sm" onClick={(e) => { e.stopPropagation(); if (window.confirm("Permanently delete \"" + c.name + "\"? This can't be undone.")) rpc("deleteCategory", { id: c.id }, "Category deleted."); }}><i className="ph ph-trash" /> Delete</button>}
         </div>
       ))}
     </div>
@@ -866,7 +880,13 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
                 {admin && a.active && (
                   <div className="fx gap8">
                     <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ acctId: a.id, amount: "", desc: "" }); setModal({ type: "addFunds", acctId: a.id, acctName: a.name }); }}><i className="ph ph-plus" /> Add funds</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ acctId: a.id, amount: "", desc: "" }); setModal({ type: "withdrawFunds", acctId: a.id, acctName: a.name }); }}><i className="ph ph-minus" /> Withdraw funds</button>
                     <button className="btn btn-ghost btn-sm" onClick={() => rpc("closeAccount", { id: a.id }, "Account closed.")}><i className="ph ph-x" /> Close</button>
+                  </div>
+                )}
+                {admin && !a.active && (
+                  <div className="fx gap8">
+                    <button className="btn btn-ghost btn-sm" onClick={() => rpc("reopenAccount", { id: a.id }, "Account reopened.")}><i className="ph ph-arrow-counter-clockwise" /> Reopen</button>
                   </div>
                 )}
               </div>
@@ -893,7 +913,20 @@ function Accounts({ data, admin, rpc, setModal, setForm }) {
           );
         })}
       </div>
-      <div className="panel"><h3 className="panel-t" style={{ marginBottom: 14 }}>Transactions</h3><div style={{ display: "flex", flexDirection: "column" }}>{data.txns.map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} onEdit={admin ? (txn) => { setForm({ amount: txn.amount, reason: "" }); setModal({ type: "editTxn", txnId: txn.id, txnDesc: txn.desc, oldAmount: txn.amount }); } : null} onDelete={admin ? (txn) => { setForm({ reason: "" }); setModal({ type: "deleteTxn", txnId: txn.id, txnDesc: txn.desc, txnAmount: txn.amount }); } : null} />)}</div></div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {[{ label: "Deposits", type: "in" }, { label: "Withdrawals", type: "out" }].map(({ label, type }) => {
+          const rows = data.txns.filter((t) => t.type === type);
+          return (
+            <div key={type} className="panel">
+              <div className="fx ac jb" style={{ marginBottom: 14 }}><h3 className="panel-t">{label}</h3><span className="dim" style={{ fontSize: 12.5, fontWeight: 700 }}>{rows.length}</span></div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {rows.length === 0 ? <div className="empty" style={{ padding: 20 }}><i className={"ph " + (type === "in" ? "ph-arrow-down-left" : "ph-arrow-up-right")} />No {label.toLowerCase()} yet.</div> :
+                  rows.map((t) => <TxnRow key={t.id} t={t} accounts={data.accounts} onEdit={admin ? (txn) => { setForm({ amount: txn.amount, reason: "" }); setModal({ type: "editTxn", txnId: txn.id, txnDesc: txn.desc, oldAmount: txn.amount }); } : null} onDelete={admin ? (txn) => { setForm({ reason: "" }); setModal({ type: "deleteTxn", txnId: txn.id, txnDesc: txn.desc, txnAmount: txn.amount }); } : null} />)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   </>);
 }
@@ -1122,7 +1155,7 @@ function Settings({ me, data, admin, rpc }) {
 
 /* ---------- Modal ---------- */
 function Modal({ ctx, modal, form, setForm, close }) {
-  const { data, rpc, catName, refresh, showToast } = ctx;
+  const { data, rpc, catName, refresh, showToast, busy } = ctx;
   const [uploading, setUploading] = useState(false);
   const [uploadFallback, setUploadFallback] = useState(false);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -1137,7 +1170,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
       const res = await fetch("/api/drive/upload", { method: "POST", body: fd });
       const json = await res.json();
       if (json.error === "FALLBACK_TO_LINK") { setUploadFallback(true); return; }
-      if (json.error) { showToast("⚠ " + json.error); return; }
+      if (json.error) { showToast(json.error, true); return; }
       await refresh();
       showToast("Document uploaded.");
       close();
@@ -1145,7 +1178,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
       setUploading(false);
     }
   };
-  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step", routeFunds: "Route funds to a purse", approveAdvance: "Issue advance", rejectProjection: "Reject projected expense", addReqDoc: "Add a required document" };
+  const titles = { newRequest: "New reimbursement request", editRequest: "Edit request", newProjection: "Submit projected expense", newUser: "Add user", newRole: "Add role", newCategory: "New expense category", attach: "Submit document (Google Drive link)", flagDisc: "Flag discrepancy", markFixed: "Document changed", disburse: "Disburse funds", newAccount: "New account", addFunds: "Add funds", withdrawFunds: "Withdraw funds", editTxn: "Correct transaction amount", newRevenue: "Projected revenue", issuePO: "Issue purchase order", proofPay: "Attach proof of payment", payDeposit: "Pay deposit", correction: "Return for correction", editNumber: "Correct a figure", deleteTxn: "Delete transaction", bankInfo: "Receiving bank account", reverseStep: "Reverse to previous step", routeFunds: "Route funds to a purse", approveAdvance: "Issue advance", rejectProjection: "Reject projected expense", addReqDoc: "Add a required document" };
   const selCat = data.categories.find((c) => c.id === form.categoryId);
 
   const submit = async () => {
@@ -1163,6 +1196,7 @@ function Modal({ ctx, modal, form, setForm, close }) {
     else if (modal.type === "disburse") ok = await rpc("advanceRequest", { id: modal.reqId, acctId: form.acctId, proofLink: form.proofLink, route: form.route, payee: form.payee, payNote: form.payNote, actualAmount: form.actualAmount, streamId: form.streamId || undefined }, "Funds disbursed.");
     else if (modal.type === "newAccount") ok = await rpc("createAccount", form, "Account created.");
     else if (modal.type === "addFunds") ok = await rpc("addFunds", { acctId: modal.acctId, amount: form.amount, desc: form.desc }, "Funds added.");
+    else if (modal.type === "withdrawFunds") ok = await rpc("withdrawFunds", { acctId: modal.acctId, amount: form.amount, desc: form.desc }, "Funds withdrawn.");
     else if (modal.type === "editTxn") ok = await rpc("editTransaction", { id: modal.txnId, amount: form.amount, reason: form.reason }, "Transaction corrected.");
     else if (modal.type === "newRevenue") ok = await rpc("createRevenue", form, "Revenue projected.");
     else if (modal.type === "issuePO") ok = await rpc("issuePurchaseOrder", { id: modal.reqId, vendor: form.vendor, amount: form.amount, link: form.link, note: form.note }, "Purchase order issued.");
@@ -1187,12 +1221,23 @@ function Modal({ ctx, modal, form, setForm, close }) {
         {(modal.type === "newRequest" || modal.type === "editRequest") && (<>
           <div className="field"><label className="label">Title</label><input className="input" value={form.title || ""} onChange={set("title")} placeholder="e.g. Snacks for opening ceremony" /></div>
           <div className="field"><label className="label">Expense category</label><select className="input" value={form.categoryId || ""} onChange={set("categoryId")}>{data.categories.filter((c) => c.active !== false).map((c) => <option key={c.id} value={c.id}>{catName(c)}</option>)}</select></div>
-          {(data.projections || []).some((p) => p.status === "advanced") && (
-            <div className="field"><label className="label">Against a projected expense (optional)</label><select className="input" value={form.projectionId || ""} onChange={set("projectionId")}>
-              <option value="">None — direct claim</option>
-              {data.projections.filter((p) => p.status === "advanced").map((p) => <option key={p.id} value={p.id}>{p.id} — {p.title} ({fmt(p.amount)})</option>)}
-            </select></div>
-          )}
+          {(() => {
+            const matchingAdvanced = (data.projections || []).filter((p) => p.status === "advanced" && p.categoryId === form.categoryId);
+            const required = selCat && !selCat.allowDirect;
+            if (matchingAdvanced.length > 0) {
+              return (
+                <div className="field"><label className="label">Against a projected expense{required ? " (required for this category)" : " (optional)"}</label><select className="input" value={form.projectionId || ""} onChange={set("projectionId")}>
+                  {!required && <option value="">None — direct claim</option>}
+                  {required && !form.projectionId && <option value="">Select a projected expense…</option>}
+                  {matchingAdvanced.map((p) => <option key={p.id} value={p.id}>{p.id} — {p.title} ({fmt(p.amount)})</option>)}
+                </select></div>
+              );
+            }
+            if (required) {
+              return <div className="field"><div className="dim" style={{ fontSize: 12.5 }}>This category requires linking to a projected expense with an issued advance. Submit one under "Projected Expenses" and have it approved first, then it'll appear here.</div></div>;
+            }
+            return null;
+          })()}
           <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
           <div className="field"><label className="label">Event date (when the expense actually happened)</label><input className="input" type="date" value={form.eventDate || ""} onChange={set("eventDate")} /></div>
           <div className="field"><label className="label">Paid via</label><select className="input" value={form.paidVia || selCat?.defaultPaidVia || "finance"} onChange={set("paidVia")}>
@@ -1293,11 +1338,32 @@ function Modal({ ctx, modal, form, setForm, close }) {
           </div></div>
         </>)}
 
-        {modal.type === "newCategory" && (<>
-          <div className="field"><label className="label">Category name (EN)</label><input className="input" value={form.name || ""} onChange={set("name")} placeholder="e.g. Equipment rental" /></div>
-          <div className="field"><label className="label">ชื่อหมวด (TH)</label><input className="input th" value={form.nameTh || ""} onChange={set("nameTh")} /></div>
-          <div className="field"><label className="label">Note (optional)</label><textarea className="input th" style={{ minHeight: 60, resize: "vertical" }} value={form.notes || ""} onChange={set("notes")} /></div>
-        </>)}
+        {modal.type === "newCategory" && (() => {
+          const catPhase = form.catDocPhase || "pre";
+          const listKey = catPhase === "post" ? "docsPost" : "docsPre";
+          const list = form[listKey] || [];
+          const toggleDoc = (name) => setForm({ ...form, [listKey]: list.includes(name) ? list.filter((d) => d !== name) : [...list, name] });
+          return (<>
+            <div className="field"><label className="label">Category name (EN)</label><input className="input" value={form.name || ""} onChange={set("name")} placeholder="e.g. Equipment rental" /></div>
+            <div className="field"><label className="label">ชื่อหมวด (TH)</label><input className="input th" value={form.nameTh || ""} onChange={set("nameTh")} /></div>
+            <div className="field"><label className="label">Note (optional)</label><textarea className="input th" style={{ minHeight: 60, resize: "vertical" }} value={form.notes || ""} onChange={set("notes")} /></div>
+            <div className="field">
+              <label className="label">Required documents</label>
+              <div className="seg" style={{ marginBottom: 10 }}>
+                <button type="button" className={catPhase === "pre" ? "on" : ""} onClick={() => setForm({ ...form, catDocPhase: "pre" })}>Pre-reimbursement</button>
+                <button type="button" className={catPhase === "post" ? "on" : ""} onClick={() => setForm({ ...form, catDocPhase: "post" })}>Closing</button>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 220, overflowY: "auto" }}>
+                {data.masterDocs.map((m) => (
+                  <div key={m.id} className={"doc clickable" + (list.includes(m.name) ? " on" : "")} onClick={() => toggleDoc(m.name)}>
+                    <div className="chk"><i className="ph ph-check" /></div><span className="th" style={{ fontSize: 13.5 }}>{m.name}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{(form.docsPre || []).length + (form.docsPost || []).length} document(s) selected — more can be added or removed after creating the category.</div>
+            </div>
+          </>);
+        })()}
 
         {modal.type === "attach" && (<>
           <div className="drive-banner" style={{ marginBottom: 18 }}><i className="ph ph-google-drive-logo" /><span className="th">Submitting — <b>{modal.name}</b></span></div>
@@ -1411,7 +1477,13 @@ function Modal({ ctx, modal, form, setForm, close }) {
           <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Faculty budget allocation" /></div>
         </>)}
 
-        {!(modal.type === "attach" && modal.driveFolderId && !uploadFallback) && <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={(modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim())) || (modal.type === "routeFunds" && !form.streamId) || (modal.type === "addReqDoc" && !(form.name || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>}
+        {modal.type === "withdrawFunds" && (<>
+          <div className="drive-banner" style={{ marginBottom: 18 }}><i className="ph ph-bank" /><span>Withdrawing funds from — <b>{modal.acctName}</b></span></div>
+          <div className="field"><label className="label">Amount (THB)</label><input className="input mono" type="number" value={form.amount || ""} onChange={set("amount")} placeholder="0" /></div>
+          <div className="field"><label className="label">Description</label><input className="input" value={form.desc || ""} onChange={set("desc")} placeholder="e.g. Returned to university treasury" /></div>
+        </>)}
+
+        {!(modal.type === "attach" && modal.driveFolderId && !uploadFallback) && <button className="btn btn-primary grad" style={{ width: "100%", marginTop: 6 }} onClick={submit} disabled={busy || (modal.type === "disburse" && !(form.acctId && (form.proofLink || "").trim() && Number(form.actualAmount) > 0 && Number(form.actualAmount) <= (modal.reqAmount || 0) && (form.route !== "selfpay" || ((form.payee || "").trim() && (form.payNote || "").trim())))) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat?.vendorRequired && !(form.vendor || "").trim()) || ((modal.type === "newRequest" || modal.type === "editRequest") && selCat && !selCat.allowDirect && !form.projectionId) || (modal.type === "bankInfo" && !((form.holder || "").trim() && (form.bank || "").trim() && (form.acctNo || "").trim())) || (modal.type === "routeFunds" && !form.streamId) || (modal.type === "addReqDoc" && !(form.name || "").trim())}><i className="ph ph-check" /> {modal.type === "flagDisc" ? "Flag & notify requester" : modal.type === "markFixed" ? "Notify officer" : modal.type === "disburse" ? "Confirm disbursement" : "Submit"}</button>}
       </div>
     </div>
   );

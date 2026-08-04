@@ -5,6 +5,7 @@ import { canManageRequestDocs } from "@/lib/permissions.mjs";
 import { isDocEditable } from "@/lib/doc-phase.mjs";
 import { uploadFileToFolder } from "@/lib/drive.mjs";
 import { applyDocAttachment } from "@/lib/attach-doc.mjs";
+import { buildDriveFileName } from "@/lib/file-naming.mjs";
 import { sendMailToUser } from "@/lib/mail.js";
 
 function err(message, status = 400) {
@@ -48,7 +49,8 @@ export async function POST(req) {
   if (!r.driveFolderId) return err("FALLBACK_TO_LINK", 409);
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const uploaded = await uploadFileToFolder({ folderId: r.driveFolderId, name: file.name, mimeType: file.type || "application/octet-stream", buffer });
+  const driveName = buildDriveFileName({ docName: doc.name, date: new Date(), by: me.name, originalName: file.name });
+  const uploaded = await uploadFileToFolder({ folderId: r.driveFolderId, name: driveName, mimeType: file.type || "application/octet-stream", buffer });
   if (!uploaded) return err("FALLBACK_TO_LINK", 409);
 
   const docs = r.docs;

@@ -558,8 +558,10 @@ export async function POST(req) {
       case "createCategory": {
         if (!admin) return err("Forbidden", 403);
         if (!body.name) return err("Enter a category name.");
+        const docsPre = Array.isArray(body.docsPre) ? [...new Set(body.docsPre.filter((d) => typeof d === "string" && d.trim()))] : [];
+        const docsPost = Array.isArray(body.docsPost) ? [...new Set(body.docsPost.filter((d) => typeof d === "string" && d.trim()))] : [];
         await prisma.category.create({
-          data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docsPre: [], docsPost: [], docExamples: {}, defaultAcctId: body.defaultAcctId || null },
+          data: { name: body.name, nameTh: body.nameTh || body.name, notes: body.notes || "", docsPre, docsPost, docExamples: {}, defaultAcctId: body.defaultAcctId || null },
         });
         await audit(me, "Created category " + body.name);
         return NextResponse.json({ ok: true });
@@ -591,6 +593,29 @@ export async function POST(req) {
         if (!c) return err("Not found", 404);
         await prisma.category.update({ where: { id: c.id }, data: { active: false } });
         await audit(me, "Closed category " + c.name);
+        return NextResponse.json({ ok: true });
+      }
+      case "reopenCategory": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        await prisma.category.update({ where: { id: c.id }, data: { active: true } });
+        await audit(me, "Reopened category " + c.name);
+        return NextResponse.json({ ok: true });
+      }
+      case "deleteCategory": {
+        if (!admin) return err("Forbidden", 403);
+        const c = await prisma.category.findUnique({ where: { id: body.id } });
+        if (!c) return err("Not found", 404);
+        const [reqCount, projCount] = await Promise.all([
+          prisma.request.count({ where: { categoryId: c.id } }),
+          prisma.projection.count({ where: { categoryId: c.id } }),
+        ]);
+        if (reqCount > 0 || projCount > 0) {
+          return err("Can't delete — " + reqCount + " request(s) and " + projCount + " projected expense(s) still reference this category. Close it instead.");
+        }
+        await prisma.category.delete({ where: { id: c.id } });
+        await audit(me, "Deleted category " + c.name);
         return NextResponse.json({ ok: true });
       }
       case "toggleCatDoc": {
@@ -749,6 +774,14 @@ export async function POST(req) {
         await audit(me, "Closed account " + acct.name);
         return NextResponse.json({ ok: true });
       }
+      case "reopenAccount": {
+        if (!admin) return err("Forbidden", 403);
+        const acct = await prisma.account.findUnique({ where: { id: body.id } });
+        if (!acct) return err("Not found", 404);
+        await prisma.account.update({ where: { id: body.id }, data: { active: true } });
+        await audit(me, "Reopened account " + acct.name);
+        return NextResponse.json({ ok: true });
+      }
       case "addFunds": {
         if (!admin) return err("Forbidden", 403);
         const amount = Number(body.amount) || 0;
@@ -758,6 +791,20 @@ export async function POST(req) {
         });
         await prisma.txn.create({ data: { acctId: acct.id, type: "in", amount, desc: body.desc || "Funds added" } });
         await audit(me, "Added " + fmt(amount) + " to account " + acct.name);
+        return NextResponse.json({ ok: true });
+      }
+      case "withdrawFunds": {
+        if (!admin) return err("Forbidden", 403);
+        const amount = Number(body.amount) || 0;
+        if (amount <= 0) return err("Enter a positive amount.");
+        const before = await prisma.account.findUnique({ where: { id: body.acctId } });
+        if (!before) return err("Not found", 404);
+        if (amount > before.balance) return err("Withdrawal exceeds the account balance.");
+        const acct = await prisma.account.update({
+          where: { id: body.acctId }, data: { balance: { decrement: amount } },
+        });
+        await prisma.txn.create({ data: { acctId: acct.id, type: "out", amount, desc: body.desc || "Funds withdrawn" } });
+        await audit(me, "Withdrew " + fmt(amount) + " from account " + acct.name);
         return NextResponse.json({ ok: true });
       }
       case "editTransaction": {
