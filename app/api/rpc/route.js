@@ -220,6 +220,7 @@ export async function POST(req) {
         }
         if (proj.status !== "submitted") return err("This projection cannot be approved.");
         const fundingAcctId = body.acctId || "faculty";
+        if (fundingAcctId === "project") return err("Cannot approve an advance from the Project account. Select a different funding source.");
         const funding = await prisma.account.findUnique({ where: { id: fundingAcctId } });
         const project = await prisma.account.findUnique({ where: { id: "project" } });
         if (!funding || !project || !funding.active || !project.active) return err("Selected funding or Project account is unavailable.");
@@ -356,7 +357,7 @@ export async function POST(req) {
           const proj = await prisma.projection.findUnique({ where: { id: r.projectionId } });
           if (proj && proj.status === "linked") {
             const settle = await settleProjectionTx(prisma, {
-              id: proj.id, currentStatus: "linked", advancedAmount: proj.amount, actualAmount,
+              id: proj.id, currentStatus: "linked", advancedAmount: proj.amount, actualAmount: disburseAmount,
               fundingAcctId: proj.fundingAcctId || undefined, facultyAcctId: "faculty", projectAcctId: "project", title: proj.title,
             });
             if (!settle.conflict && settle.refund > 0) {
